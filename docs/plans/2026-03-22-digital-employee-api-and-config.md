@@ -291,3 +291,18 @@ These endpoints are available in both global and agent-scoped routing.
 - `tests/unit/crons/test_audit_events.py`: `4 passed`
 - `tests/unit/crons`: `24 passed`
 - `tests/unit`: `315 passed`
+
+## 17) API Contract Regression Suite
+
+### Added coverage
+- `GET /config/triggers`
+- `PUT /config/triggers`
+- `GET /cron/audit/events`
+- `GET /cron/audit/stats`
+
+### Test file
+- `tests/unit/app/test_api_contract_new_features.py`
+
+### Batch-9 test summary
+- `tests/unit/app/test_api_contract_new_features.py`: `3 passed`
+- `tests/unit`: `318 passed`

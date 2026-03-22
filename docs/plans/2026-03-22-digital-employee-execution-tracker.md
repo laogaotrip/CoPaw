@@ -167,3 +167,11 @@
   - Added/updated unit tests:
     - `tests/unit/crons/test_audit_events.py`
   - Regression: full `tests/unit` passed.
+- 2026-03-23: API contract regression suite added:
+  - Added contract tests for newly added endpoints:
+    - `/config/triggers`
+    - `/cron/audit/events`
+    - `/cron/audit/stats`
+  - Added file:
+    - `tests/unit/app/test_api_contract_new_features.py`
+  - Regression: full `tests/unit` passed.
