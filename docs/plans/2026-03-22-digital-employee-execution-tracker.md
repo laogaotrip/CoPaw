@@ -13,7 +13,7 @@
 ## Progress Matrix
 - [~] A. Primary/Fallback Models (in progress: config + runtime wrapper + API done; full regression pending)
 - [x] B. Unified Trigger Engine (phase-1/2 backend done: once/interval/on_message/webhook/poll)
-- [~] C. Agent Collaboration (v1 backend routing via cron dispatch meta)
+- [x] C. Agent Collaboration (v1 routing + v2 notify/consult/delegate API)
 - [~] D. Knowledge Base V1 (dual-layer search API/tool done; regression pending)
 - [~] E. Autonomy Boundaries (L1/L2/L3 policy wired to tool-guard flow)
 - [~] F. Self-Evolution (full-auto scheduler + config APIs)
@@ -80,3 +80,21 @@
   - Added poll scheduler execution flow (interval-based poll + response filter + `skipped` status when unmatched).
   - Added unit tests for schedule validation, webhook/poll matching, and webhook API forwarding.
   - Regression: `tests/unit/crons` passed and full `tests/unit` passed.
+- 2026-03-22: Slice C v2 implemented:
+  - Added cross-agent collaboration service with three semantics:
+    - `notify`
+    - `consult`
+    - `delegate`
+  - Added API endpoints:
+    - `POST /collaboration/notify`
+    - `POST /collaboration/consult`
+    - `POST /collaboration/delegate`
+  - Added collaboration safeguards:
+    - self-target rejection
+    - delegation hop limit (`<=3`)
+    - target runner/channel availability validation
+  - Added lightweight collaboration audit trail:
+    - `collaboration_events.jsonl` in source agent workspace
+  - Added unit tests and full regression:
+    - `tests/unit/collaboration/test_service.py`
+    - full `tests/unit` passed.

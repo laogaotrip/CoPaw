@@ -149,3 +149,30 @@ Commands used:
 ### Batch-2 test summary
 - `tests/unit/crons`: `16 passed`
 - `tests/unit`: `297 passed`
+
+## 11) Agent Collaboration v2 (C)
+
+### New APIs
+- `POST /collaboration/notify`
+- `POST /collaboration/consult`
+- `POST /collaboration/delegate`
+
+These endpoints are available in both global and agent-scoped routing.
+
+### Runtime behavior
+- `notify`: sends direct text notification through target agent channel manager.
+- `consult`: asks target agent and returns aggregated response text.
+- `delegate`: sends delegated task to target agent and returns aggregated response text.
+
+### Guardrails
+- Reject self-target collaboration (`target_agent_id == source_agent_id`).
+- Delegation hop limit (`<= 3`) to avoid delegation loops.
+- Validate target runner/channel-manager availability.
+
+### Lightweight audit
+- Source workspace writes collaboration records to:
+  - `collaboration_events.jsonl`
+
+### Batch-3 test summary
+- `tests/unit/collaboration/test_service.py`: `4 passed`
+- `tests/unit`: `301 passed`
