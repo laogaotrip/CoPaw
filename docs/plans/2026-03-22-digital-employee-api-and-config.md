@@ -270,3 +270,24 @@ These endpoints are available in both global and agent-scoped routing.
 - `tests/unit/collaboration/test_service.py`: `8 passed`
 - `tests/unit/collaboration/test_api.py`: `2 passed`
 - `tests/unit`: `313 passed`
+
+## 16) Cron Audit Stats (C)
+
+### New API
+- `GET /cron/audit/stats`
+  - Query params:
+    - `since_hours` (0-720, default 24)
+
+### Runtime behavior
+- Cron manager aggregates audit events from `cron_audit_events.jsonl`.
+- Returns:
+  - `total`
+  - `by_status`
+  - `by_trigger_type`
+  - `since_hours`
+- Time-window filter uses audit `time` field; `since_hours=0` means all records.
+
+### Batch-8 test summary
+- `tests/unit/crons/test_audit_events.py`: `4 passed`
+- `tests/unit/crons`: `24 passed`
+- `tests/unit`: `315 passed`

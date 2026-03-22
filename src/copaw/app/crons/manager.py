@@ -6,7 +6,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -187,6 +187,34 @@ class CronManager:
                 rows.append(row)
         rows.reverse()
         return rows[:max_limit]
+
+    def get_audit_stats(self, *, since_hours: int = 24) -> Dict[str, Any]:
+        """Aggregate audit events for observability dashboards."""
+        rows = self.list_audit_events(limit=10000)
+        cutoff = None
+        if since_hours > 0:
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+
+        by_status: Dict[str, int] = {}
+        by_trigger: Dict[str, int] = {}
+        total = 0
+        for row in rows:
+            if cutoff is not None:
+                ts = self._parse_ts(row.get("time", ""))
+                if ts is None or ts < cutoff:
+                    continue
+            total += 1
+            status = str(row.get("status", "") or "unknown")
+            trigger = str(row.get("trigger_type", "") or "unknown")
+            by_status[status] = by_status.get(status, 0) + 1
+            by_trigger[trigger] = by_trigger.get(trigger, 0) + 1
+
+        return {
+            "total": total,
+            "by_status": by_status,
+            "by_trigger_type": by_trigger,
+            "since_hours": since_hours,
+        }
 
     # ----- write/control -----
 
@@ -838,3 +866,16 @@ class CronManager:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fp:
             fp.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    @staticmethod
+    def _parse_ts(ts: str) -> Optional[datetime]:
+        if not ts:
+            return None
+        fixed = ts.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(fixed)
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)

@@ -144,6 +144,14 @@ async def get_audit_events(
     return {"events": events}
 
 
+@router.get("/audit/stats")
+async def get_audit_stats(
+    since_hours: int = Query(default=24, ge=0, le=24 * 30),
+    mgr: CronManager = Depends(get_cron_manager),
+):
+    return mgr.get_audit_stats(since_hours=since_hours)
+
+
 @router.post("/webhook/trigger")
 async def trigger_webhook(
     body: WebhookTriggerRequest,

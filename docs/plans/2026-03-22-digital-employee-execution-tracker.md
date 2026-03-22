@@ -155,3 +155,15 @@
     - `tests/unit/collaboration/test_service.py`
     - `tests/unit/collaboration/test_api.py`
   - Regression: full `tests/unit` passed.
+- 2026-03-22: Slice C audit stats enhancement implemented:
+  - Added cron audit stats aggregation in manager layer.
+  - Added cron audit stats API:
+    - `GET /cron/audit/stats`
+    - supports `since_hours` window filtering.
+  - Stats dimensions:
+    - total events
+    - by status
+    - by trigger type
+  - Added/updated unit tests:
+    - `tests/unit/crons/test_audit_events.py`
+  - Regression: full `tests/unit` passed.
