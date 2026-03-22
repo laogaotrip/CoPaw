@@ -3,11 +3,22 @@ from __future__ import annotations
 
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from .manager import CronManager
 from .models import CronJobSpec, CronJobView
 
 router = APIRouter(prefix="/cron", tags=["cron"])
+
+
+class WebhookTriggerRequest(BaseModel):
+    event: str = Field(description="Webhook event name")
+    source: str = Field(default="", description="Webhook source")
+    channel: str = Field(default="", description="Optional channel filter value")
+    user_id: str = Field(default="", description="Optional user id")
+    session_id: str = Field(default="", description="Optional session id")
+    text: str = Field(default="", description="Optional text for contains/pattern")
+    payload: dict = Field(default_factory=dict, description="Raw webhook payload")
 
 
 async def get_cron_manager(
@@ -114,3 +125,23 @@ async def get_job_state(
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
     return mgr.get_state(job_id).model_dump(mode="json")
+
+
+@router.post("/webhook/trigger")
+async def trigger_webhook(
+    body: WebhookTriggerRequest,
+    mgr: CronManager = Depends(get_cron_manager),
+):
+    try:
+        fired = await mgr.handle_webhook_event(
+            event=body.event,
+            source=body.source,
+            channel=body.channel,
+            user_id=body.user_id,
+            session_id=body.session_id,
+            text=body.text,
+            payload=body.payload,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"fired": fired}

@@ -57,7 +57,14 @@ def _crontab_dow_to_name(field: str) -> str:
 
 
 class ScheduleSpec(BaseModel):
-    type: Literal["cron", "once", "interval", "on_message"] = "cron"
+    type: Literal[
+        "cron",
+        "once",
+        "interval",
+        "on_message",
+        "webhook",
+        "poll",
+    ] = "cron"
     cron: Optional[str] = Field(default=None)
     at: Optional[datetime] = Field(
         default=None,
@@ -88,7 +95,49 @@ class ScheduleSpec(BaseModel):
         default=None,
         description="For type=on_message, regex pattern match.",
     )
+    webhook_event: Optional[str] = Field(
+        default=None,
+        description="For type=webhook, optional event name filter.",
+    )
+    webhook_source: Optional[str] = Field(
+        default=None,
+        description="For type=webhook, optional source filter.",
+    )
+    poll_url: Optional[str] = Field(
+        default=None,
+        description="For type=poll, target URL to poll.",
+    )
+    poll_method: str = Field(
+        default="GET",
+        description="For type=poll, HTTP method.",
+    )
+    poll_timeout_seconds: int = Field(
+        default=10,
+        ge=1,
+        le=300,
+        description="For type=poll, request timeout in seconds.",
+    )
+    poll_expected_status: Optional[int] = Field(
+        default=None,
+        ge=100,
+        le=599,
+        description="For type=poll, optional expected HTTP status code.",
+    )
+    poll_headers: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="For type=poll, optional HTTP headers.",
+    )
+    poll_body: Optional[str] = Field(
+        default=None,
+        description="For type=poll, optional request body.",
+    )
     timezone: str = "UTC"
+
+    @field_validator("poll_method")
+    @classmethod
+    def normalize_poll_method(cls, v: str) -> str:
+        method = (v or "").strip().upper()
+        return method or "GET"
 
     @field_validator("cron")
     @classmethod
@@ -135,7 +184,25 @@ class ScheduleSpec(BaseModel):
                 )
             return self
 
-        if self.type == "on_message":
+        if self.type in {"on_message", "webhook"}:
+            if self.pattern:
+                try:
+                    re.compile(self.pattern)
+                except re.error as e:  # pragma: no cover
+                    raise ValueError(
+                        f"invalid schedule.pattern regex: {e}",
+                    ) from e
+            return self
+
+        if self.type == "poll":
+            if self.every_seconds is None:
+                raise ValueError(
+                    "schedule.every_seconds is required when type=poll",
+                )
+            if not (self.poll_url and self.poll_url.strip()):
+                raise ValueError(
+                    "schedule.poll_url is required when type=poll",
+                )
             if self.pattern:
                 try:
                     re.compile(self.pattern)

@@ -12,7 +12,7 @@
 
 ## Progress Matrix
 - [~] A. Primary/Fallback Models (in progress: config + runtime wrapper + API done; full regression pending)
-- [~] B. Unified Trigger Engine (phase-1 backend done: once/interval/on_message; regression pending)
+- [x] B. Unified Trigger Engine (phase-1/2 backend done: once/interval/on_message/webhook/poll)
 - [~] C. Agent Collaboration (v1 backend routing via cron dispatch meta)
 - [~] D. Knowledge Base V1 (dual-layer search API/tool done; regression pending)
 - [~] E. Autonomy Boundaries (L1/L2/L3 policy wired to tool-guard flow)
@@ -73,3 +73,10 @@
   - Added MCP preset discovery API (`GET /mcp/discovery/presets`).
   - Added MCP preset import API (`POST /mcp/discovery/import`).
   - Added unit tests for preset catalog.
+- 2026-03-22: Slice B phase-2 implemented:
+  - Extended schedule type to support `webhook` and `poll`.
+  - Added webhook trigger API (`POST /cron/webhook/trigger`).
+  - Added cron manager webhook dispatch matching (`webhook_event`, `webhook_source`, optional identity/text filters).
+  - Added poll scheduler execution flow (interval-based poll + response filter + `skipped` status when unmatched).
+  - Added unit tests for schedule validation, webhook/poll matching, and webhook API forwarding.
+  - Regression: `tests/unit/crons` passed and full `tests/unit` passed.

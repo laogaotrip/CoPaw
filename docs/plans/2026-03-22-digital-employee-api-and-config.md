@@ -1,7 +1,7 @@
-# Digital Employee Migration - API & Config Notes (Batch 1)
+# Digital Employee Migration - API & Config Notes (Batch 1-2)
 
-This document records the first implementation batch API/config additions for
-digital employee capabilities (A-H), focused on backward compatibility.
+This document records API/config additions for digital employee migration
+batches, focused on backward compatibility.
 
 ## 1) Model Slots (A)
 
@@ -124,3 +124,28 @@ In Python 3.12 venv (`.venv312`) with project dependencies installed:
 Commands used:
 - `PYTHONPATH=src .venv312/bin/pytest -q tests/unit`
 
+## 10) Trigger Engine Phase-2 (B)
+
+### Extended schedule types
+- `webhook` (new)
+- `poll` (new)
+
+### New schedule fields
+- `webhook_event`, `webhook_source` (`webhook`)
+- `poll_url`, `poll_method`, `poll_timeout_seconds`, `poll_expected_status`,
+  `poll_headers`, `poll_body` (`poll`)
+- Reuse response/event text filters: `contains`, `pattern`
+
+### New API
+- `POST /cron/webhook/trigger`
+  - Body: `event`, `source`, `channel`, `user_id`, `session_id`, `text`, `payload`
+  - Response: `{ "fired": <int> }`
+
+### Runtime behavior
+- `webhook` jobs are event-driven and do not create APScheduler jobs.
+- `poll` jobs use interval scheduling (`every_seconds`) and only execute task
+  when response filters match; unmatched probes set job state to `skipped`.
+
+### Batch-2 test summary
+- `tests/unit/crons`: `16 passed`
+- `tests/unit`: `297 passed`

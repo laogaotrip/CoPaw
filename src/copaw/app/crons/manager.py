@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.cron import CronTrigger
@@ -57,6 +59,7 @@ class CronManager:
         self._states: Dict[str, CronJobState] = {}
         self._rt: Dict[str, _Runtime] = {}
         self._on_message_jobs: set[str] = set()
+        self._webhook_jobs: set[str] = set()
         self._started = False
 
     async def start(self) -> None:
@@ -156,6 +159,7 @@ class CronManager:
             if self._started and self._scheduler.get_job(job_id):
                 self._scheduler.remove_job(job_id)
             self._on_message_jobs.discard(job_id)
+            self._webhook_jobs.discard(job_id)
             self._states.pop(job_id, None)
             self._rt.pop(job_id, None)
             return await self._repo.delete_job(job_id)
@@ -331,6 +335,46 @@ class CronManager:
             task.add_done_callback(lambda t, spec=job: self._task_done_cb(t, spec))
         return fired
 
+    async def handle_webhook_event(
+        self,
+        *,
+        event: str,
+        source: str = "",
+        channel: str = "",
+        user_id: str = "",
+        session_id: str = "",
+        text: str = "",
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Handle one inbound webhook event and trigger webhook jobs."""
+        fired = 0
+        jobs = await self._repo.list_jobs()
+        payload_text = text
+        if not payload_text and payload:
+            payload_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        for job in jobs:
+            if not job.enabled:
+                continue
+            if job.schedule.type != "webhook":
+                continue
+            if not self._webhook_matches(
+                job,
+                event=event,
+                source=source,
+                channel=channel,
+                user_id=user_id,
+                session_id=session_id,
+                text=payload_text or "",
+            ):
+                continue
+            fired += 1
+            task = asyncio.create_task(
+                self._execute_once(job),
+                name=f"cron-webhook-{job.id}",
+            )
+            task.add_done_callback(lambda t, spec=job: self._task_done_cb(t, spec))
+        return fired
+
     @staticmethod
     def _on_message_matches(
         job: CronJobSpec,
@@ -365,6 +409,70 @@ class CronManager:
 
         return True
 
+    @staticmethod
+    def _webhook_matches(
+        job: CronJobSpec,
+        *,
+        event: str,
+        source: str,
+        channel: str,
+        user_id: str,
+        session_id: str,
+        text: str,
+    ) -> bool:
+        """Return True if webhook schedule matches the event."""
+        sch = job.schedule
+        if sch.webhook_event and sch.webhook_event != event:
+            return False
+        if sch.webhook_source and sch.webhook_source != source:
+            return False
+        if sch.channel and sch.channel != channel:
+            return False
+
+        expected_user = sch.user_id or job.dispatch.target.user_id
+        if expected_user and expected_user != user_id:
+            return False
+
+        expected_session = sch.session_id or job.dispatch.target.session_id
+        if expected_session and expected_session != session_id:
+            return False
+
+        if sch.contains and sch.contains.lower() not in (text or "").lower():
+            return False
+
+        if sch.pattern:
+            try:
+                if re.search(sch.pattern, text or "") is None:
+                    return False
+            except re.error:
+                return False
+
+        return True
+
+    @staticmethod
+    def _poll_response_matches(
+        job: CronJobSpec,
+        *,
+        status_code: int,
+        text: str,
+    ) -> bool:
+        """Return True if poll response matches schedule conditions."""
+        sch = job.schedule
+        if sch.poll_expected_status is not None:
+            if status_code != sch.poll_expected_status:
+                return False
+
+        if sch.contains and sch.contains.lower() not in (text or "").lower():
+            return False
+
+        if sch.pattern:
+            try:
+                if re.search(sch.pattern, text or "") is None:
+                    return False
+            except re.error:
+                return False
+        return True
+
     async def _register_or_update(self, spec: CronJobSpec) -> None:
         # per-job concurrency semaphore
         self._rt[spec.id] = _Runtime(
@@ -377,12 +485,22 @@ class CronManager:
 
         if spec.schedule.type == "on_message":
             self._on_message_jobs.add(spec.id)
+            self._webhook_jobs.discard(spec.id)
+            st = self._states.get(spec.id, CronJobState())
+            st.next_run_at = None
+            self._states[spec.id] = st
+            return
+
+        if spec.schedule.type == "webhook":
+            self._webhook_jobs.add(spec.id)
+            self._on_message_jobs.discard(spec.id)
             st = self._states.get(spec.id, CronJobState())
             st.next_run_at = None
             self._states[spec.id] = st
             return
 
         self._on_message_jobs.discard(spec.id)
+        self._webhook_jobs.discard(spec.id)
         # Validate and build trigger first. If invalid, fail fast without
         # mutating scheduler/runtime state.
         trigger = self._build_trigger(spec)
@@ -418,6 +536,13 @@ class CronManager:
                 timezone=schedule.timezone,
             )
 
+        if schedule.type == "poll":
+            assert schedule.every_seconds is not None
+            return IntervalTrigger(
+                seconds=schedule.every_seconds,
+                timezone=schedule.timezone,
+            )
+
         # enforce 5 fields (no seconds)
         cron_expr = schedule.cron or ""
         parts = [p for p in cron_expr.split() if p]
@@ -442,13 +567,60 @@ class CronManager:
         if not job:
             return
 
-        await self._execute_once(job)
+        if job.schedule.type == "poll":
+            await self._execute_poll_once(job)
+        else:
+            await self._execute_once(job)
 
         # refresh next_run
         aps_job = self._scheduler.get_job(job_id)
         st = self._states.get(job_id, CronJobState())
         st.next_run_at = aps_job.next_run_time if aps_job else None
         self._states[job_id] = st
+
+    async def _execute_poll_once(self, job: CronJobSpec) -> None:
+        sch = job.schedule
+        assert sch.poll_url is not None
+        method = sch.poll_method or "GET"
+        headers = sch.poll_headers or {}
+        kwargs: Dict[str, Any] = {
+            "method": method,
+            "url": sch.poll_url,
+            "headers": headers,
+        }
+        if sch.poll_body is not None:
+            kwargs["content"] = sch.poll_body
+
+        st = self._states.get(job.id, CronJobState())
+        try:
+            async with httpx.AsyncClient(
+                timeout=sch.poll_timeout_seconds,
+                follow_redirects=True,
+                trust_env=False,
+            ) as client:
+                resp = await client.request(**kwargs)
+            matched = self._poll_response_matches(
+                job,
+                status_code=resp.status_code,
+                text=resp.text,
+            )
+            if not matched:
+                st.last_status = "skipped"
+                st.last_error = None
+                self._states[job.id] = st
+                return
+        except Exception as e:  # pylint: disable=broad-except
+            st.last_status = "error"
+            st.last_error = repr(e)
+            self._states[job.id] = st
+            logger.error(
+                "cron poll probe failed: job_id=%s error=%s",
+                job.id,
+                repr(e),
+            )
+            return
+
+        await self._execute_once(job)
 
     async def _heartbeat_callback(self) -> None:
         """Run one heartbeat (HEARTBEAT.md as query, optional dispatch)."""
