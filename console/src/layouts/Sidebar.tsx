@@ -39,6 +39,8 @@ import {
   Mic,
   Bot,
   LogOut,
+  GitMerge,
+  History,
 } from "lucide-react";
 import api from "../api";
 import { clearAuthToken } from "../api/config";
@@ -249,6 +251,16 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           label: t("nav.heartbeat"),
           icon: <Activity size={16} />,
         },
+        {
+          key: "collaboration",
+          label: t("nav.collaboration"),
+          icon: <GitMerge size={16} />,
+        },
+        {
+          key: "cron-audit",
+          label: t("nav.cronAudit"),
+          icon: <History size={16} />,
+        },
       ],
     },
     {
@@ -297,6 +309,11 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           key: "voice-transcription",
           label: t("nav.voiceTranscription"),
           icon: <Mic size={16} />,
+        },
+        {
+          key: "digital-employee",
+          label: t("nav.digitalEmployee"),
+          icon: <Sparkles size={16} />,
         },
       ],
     },

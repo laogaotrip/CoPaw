@@ -20,7 +20,13 @@ export default function AgentSelector() {
     try {
       setLoading(true);
       const data = await agentsApi.listAgents();
-      setAgents(data.agents);
+      if (Array.isArray(data?.agents)) {
+        setAgents(data.agents);
+      } else {
+        setAgents([]);
+        message.error(t("agent.loadFailed"));
+        console.error("Invalid /agents response shape:", data);
+      }
     } catch (error) {
       console.error("Failed to load agents:", error);
       message.error(t("agent.loadFailed"));
@@ -34,7 +40,8 @@ export default function AgentSelector() {
     message.success(t("agent.switchSuccess"));
   };
 
-  const agentCount = agents.length;
+  const safeAgents = Array.isArray(agents) ? agents : [];
+  const agentCount = safeAgents.length;
 
   return (
     <div className={styles.agentSelectorWrapper}>
@@ -56,7 +63,7 @@ export default function AgentSelector() {
           </div>
         }
       >
-        {agents.map((agent) => (
+        {safeAgents.map((agent) => (
           <Select.Option
             key={agent.id}
             value={agent.id}

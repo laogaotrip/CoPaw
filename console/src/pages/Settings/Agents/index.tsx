@@ -10,7 +10,7 @@ import styles from "./index.module.less";
 
 export default function AgentsPage() {
   const { t } = useTranslation();
-  const { agents, loading, deleteAgent } = useAgents();
+  const { agents, loading, deleteAgent, loadAgents } = useAgents();
   const [modalVisible, setModalVisible] = useState(false);
   const [editingAgent, setEditingAgent] = useState<AgentSummary | null>(null);
   const [form] = Form.useForm();
@@ -57,10 +57,15 @@ export default function AgentsPage() {
         message.success(`${t("agent.createSuccess")} (ID: ${result.id})`);
       }
 
+      await loadAgents();
       setModalVisible(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to save agent:", error);
-      message.error(error.message || t("agent.saveFailed"));
+      if (error instanceof Error) {
+        message.error(error.message || t("agent.saveFailed"));
+      } else {
+        message.error(t("agent.saveFailed"));
+      }
     }
   };
 

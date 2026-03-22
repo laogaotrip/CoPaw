@@ -1,0 +1,84 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.description {
+  margin: 6px 0 0;
+  color: #6b7280;
+}
+
+.loading {
+  color: #6b7280;
+}
+
+.card {
+  border-radius: 10px;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.cardDescription {
+  margin: 8px 0 16px;
+  color: #6b7280;
+}
+
+.rowTwo {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.rowThree {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.feedbackSuccess {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #16a34a;
+}
+
+.feedbackError {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #dc2626;
+}
+
+@media (max-width: 1024px) {
+  .rowTwo,
+  .rowThree {
+    grid-template-columns: 1fr;
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

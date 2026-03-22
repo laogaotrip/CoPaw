@@ -3,6 +3,7 @@ import { Form, message } from "@agentscope-ai/design";
 import { useTranslation } from "react-i18next";
 
 import api from "../../../api";
+import { useAgentStore } from "../../../stores/agentStore";
 import {
   ChannelCard,
   ChannelDrawer,
@@ -16,6 +17,7 @@ type FilterType = "all" | "builtin" | "custom";
 
 function ChannelsPage() {
   const { t } = useTranslation();
+  const { selectedAgent, agents } = useAgentStore();
   const { channels, orderedKeys, isBuiltin, loading, fetchChannels } =
     useChannels();
   const [filter, setFilter] = useState<FilterType>("all");
@@ -99,6 +101,10 @@ function ChannelsPage() {
   };
 
   const activeLabel = activeKey ? getChannelLabel(activeKey) : "";
+  const currentAgentName = useMemo(
+    () => agents.find((agent) => agent.id === selectedAgent)?.name || selectedAgent,
+    [agents, selectedAgent],
+  );
 
   const FILTER_TABS: { key: FilterType; label: string }[] = [
     { key: "all", label: t("channels.filterAll") },
@@ -112,6 +118,14 @@ function ChannelsPage() {
         <div>
           <h1 className={styles.title}>{t("channels.title")}</h1>
           <p className={styles.description}>{t("channels.description")}</p>
+          <div className={styles.agentNotice}>
+            <span className={styles.agentNoticeLabel}>
+              {t("agent.currentWorkspace")}:
+            </span>
+            <span className={styles.agentNoticeValue}>
+              {currentAgentName} ({selectedAgent})
+            </span>
+          </div>
         </div>
         <div className={styles.filterTabs}>
           {FILTER_TABS.map(({ key, label }) => (

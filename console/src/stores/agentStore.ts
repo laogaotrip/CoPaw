@@ -20,7 +20,7 @@ export const useAgentStore = create<AgentStore>()(
 
       setSelectedAgent: (agentId) => set({ selectedAgent: agentId }),
 
-      setAgents: (agents) => set({ agents }),
+      setAgents: (agents) => set({ agents: Array.isArray(agents) ? agents : [] }),
 
       addAgent: (agent) =>
         set((state) => ({

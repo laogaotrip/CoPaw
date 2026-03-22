@@ -22,6 +22,7 @@ import { tokenUsageApi } from "./modules/tokenUsage";
 import { toolsApi } from "./modules/tools";
 import { securityApi } from "./modules/security";
 import { userTimezoneApi } from "./modules/userTimezone";
+import { digitalEmployeeApi } from "./modules/digitalEmployee";
 
 export const api = {
   // Root
@@ -76,6 +77,9 @@ export const api = {
 
   // User Timezone
   ...userTimezoneApi,
+
+  // Digital Employee
+  ...digitalEmployeeApi,
 };
 
 export default api;

@@ -9,6 +9,8 @@ import ChannelsPage from "../../pages/Control/Channels";
 import SessionsPage from "../../pages/Control/Sessions";
 import CronJobsPage from "../../pages/Control/CronJobs";
 import HeartbeatPage from "../../pages/Control/Heartbeat";
+import CollaborationPage from "../../pages/Control/Collaboration";
+import CronAuditPage from "../../pages/Control/CronAudit";
 import AgentConfigPage from "../../pages/Agent/Config";
 import SkillsPage from "../../pages/Agent/Skills";
 import ToolsPage from "../../pages/Agent/Tools";
@@ -20,6 +22,7 @@ import SecurityPage from "../../pages/Settings/Security";
 import TokenUsagePage from "../../pages/Settings/TokenUsage";
 import VoiceTranscriptionPage from "../../pages/Settings/VoiceTranscription";
 import AgentsPage from "../../pages/Settings/Agents";
+import DigitalEmployeePage from "../../pages/Settings/DigitalEmployee";
 
 const { Content } = Layout;
 
@@ -29,6 +32,8 @@ const pathToKey: Record<string, string> = {
   "/sessions": "sessions",
   "/cron-jobs": "cron-jobs",
   "/heartbeat": "heartbeat",
+  "/collaboration": "collaboration",
+  "/cron-audit": "cron-audit",
   "/skills": "skills",
   "/tools": "tools",
   "/mcp": "mcp",
@@ -40,6 +45,7 @@ const pathToKey: Record<string, string> = {
   "/security": "security",
   "/token-usage": "token-usage",
   "/voice-transcription": "voice-transcription",
+  "/digital-employee": "digital-employee",
 };
 
 export default function MainLayout() {
@@ -62,6 +68,8 @@ export default function MainLayout() {
               <Route path="/sessions" element={<SessionsPage />} />
               <Route path="/cron-jobs" element={<CronJobsPage />} />
               <Route path="/heartbeat" element={<HeartbeatPage />} />
+              <Route path="/collaboration" element={<CollaborationPage />} />
+              <Route path="/cron-audit" element={<CronAuditPage />} />
               <Route path="/skills" element={<SkillsPage />} />
               <Route path="/tools" element={<ToolsPage />} />
               <Route path="/mcp" element={<MCPPage />} />
@@ -75,6 +83,10 @@ export default function MainLayout() {
               <Route
                 path="/voice-transcription"
                 element={<VoiceTranscriptionPage />}
+              />
+              <Route
+                path="/digital-employee"
+                element={<DigitalEmployeePage />}
               />
             </Routes>
           </div>
