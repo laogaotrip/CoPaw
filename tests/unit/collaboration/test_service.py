@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from copaw.app.collaboration.service import (
@@ -47,11 +50,18 @@ class _DummyChannelManager:
 
 
 class _DummyWorkspace:
-    def __init__(self, *, agent_id: str, runner=None, channel_manager=None):
+    def __init__(
+        self,
+        *,
+        agent_id: str,
+        runner=None,
+        channel_manager=None,
+        workspace_dir: str = "/tmp",
+    ):
         self.agent_id = agent_id
         self.runner = runner
         self.channel_manager = channel_manager
-        self.workspace_dir = "/tmp"
+        self.workspace_dir = workspace_dir
 
 
 class _DummyManager:
@@ -149,3 +159,66 @@ async def test_delegate_rejects_when_hop_limit_exceeded() -> None:
             session_id="s1",
             hop_count=4,
         )
+
+
+@pytest.mark.asyncio
+async def test_consult_rejects_target_outside_workspace_root() -> None:
+    target_workspace = _DummyWorkspace(
+        agent_id="agent-b",
+        runner=_DummyRunner([]),
+        workspace_dir="/opt/other/workspaces/agent-b",
+    )
+    manager = _DummyManager(target_workspace)
+    source_workspace = _DummyWorkspace(
+        agent_id="agent-a",
+        workspace_dir="/tmp/workspaces/agent-a",
+    )
+    source_workspace._manager = manager  # pylint: disable=protected-access
+    service = CollaborationService(source_workspace)
+
+    with pytest.raises(CollaborationError, match="outside workspace boundary"):
+        await service.consult(
+            target_agent_id="agent-b",
+            prompt="help me",
+            user_id="u1",
+            session_id="s1",
+        )
+
+
+def test_list_events_returns_latest_first_and_filterable(tmp_path: Path) -> None:
+    ws = _DummyWorkspace(
+        agent_id="agent-a",
+        workspace_dir=str(tmp_path / "workspaces" / "agent-a"),
+    )
+    service = CollaborationService(ws)
+    events_path = Path(ws.workspace_dir) / "collaboration_events.jsonl"
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {
+            "time": "2026-03-22T10:00:00Z",
+            "source_agent_id": "agent-a",
+            "target_agent_id": "agent-b",
+            "mode": "notify",
+            "payload": {"text": "n1"},
+            "response_text": "",
+        },
+        {
+            "time": "2026-03-22T10:01:00Z",
+            "source_agent_id": "agent-a",
+            "target_agent_id": "agent-c",
+            "mode": "delegate",
+            "payload": {"task": "d1"},
+            "response_text": "ok",
+        },
+    ]
+    with events_path.open("w", encoding="utf-8") as fp:
+        for row in rows:
+            fp.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    latest = service.list_events(limit=1)
+    assert len(latest) == 1
+    assert latest[0]["mode"] == "delegate"
+
+    filtered = service.list_events(limit=10, mode="notify", target_agent_id="agent-b")
+    assert len(filtered) == 1
+    assert filtered[0]["mode"] == "notify"

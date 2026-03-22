@@ -120,3 +120,14 @@
     - `tests/unit/crons/test_trigger_security.py`
     - `tests/unit/workspace/test_agent_model.py` (trigger policy persistence)
   - Regression: full `tests/unit` passed.
+- 2026-03-22: Slice C hardening implemented:
+  - Added collaboration boundary enforcement:
+    - source and target agents must be under the same workspaces root.
+  - Added collaboration audit query capability:
+    - `GET /collaboration/events`
+    - supports filters: `limit`, `mode`, `target_agent_id`.
+  - Added service-level event list reader with latest-first ordering.
+  - Added unit tests:
+    - `tests/unit/collaboration/test_service.py`
+    - `tests/unit/collaboration/test_api.py`
+  - Regression: full `tests/unit` passed.

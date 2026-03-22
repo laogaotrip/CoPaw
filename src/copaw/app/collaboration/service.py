@@ -172,7 +172,9 @@ class CollaborationService:
         manager = getattr(self._workspace, "_manager", None)
         if manager is None:
             raise CollaborationError("multi-agent manager unavailable")
-        return await manager.get_agent(target_agent_id)
+        target = await manager.get_agent(target_agent_id)
+        self._validate_workspace_boundary(target)
+        return target
 
     @staticmethod
     def _extract_text(event: Any) -> str:
@@ -203,9 +205,49 @@ class CollaborationService:
             "payload": payload,
             "response_text": response_text,
         }
-        path = Path(self._workspace.workspace_dir) / "collaboration_events.jsonl"
+        path = self._events_path()
         line = json.dumps(record, ensure_ascii=False) + "\n"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fp:
             fp.write(line)
 
+    def list_events(
+        self,
+        *,
+        limit: int = 50,
+        mode: Optional[str] = None,
+        target_agent_id: Optional[str] = None,
+    ) -> list[Dict[str, Any]]:
+        """Read collaboration audit records from local jsonl store."""
+        max_limit = max(1, min(int(limit), 500))
+        path = self._events_path()
+        if not path.exists():
+            return []
+
+        rows: list[Dict[str, Any]] = []
+        with path.open("r", encoding="utf-8") as fp:
+            for line in fp:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if mode and row.get("mode") != mode:
+                    continue
+                if target_agent_id and row.get("target_agent_id") != target_agent_id:
+                    continue
+                rows.append(row)
+        rows.reverse()  # latest first
+        return rows[:max_limit]
+
+    def _events_path(self) -> Path:
+        return Path(self._workspace.workspace_dir) / "collaboration_events.jsonl"
+
+    def _validate_workspace_boundary(self, target_workspace: Any) -> None:
+        """Ensure source and target are under the same workspaces root."""
+        src_root = Path(self._workspace.workspace_dir).expanduser().resolve().parent
+        tgt_root = Path(target_workspace.workspace_dir).expanduser().resolve().parent
+        if src_root != tgt_root:
+            raise CollaborationError("target agent is outside workspace boundary")

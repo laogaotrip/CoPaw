@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from .service import CollaborationError, CollaborationService
@@ -104,3 +104,17 @@ async def delegate(
         "events": result.events,
     }
 
+
+@router.get("/events")
+async def get_events(
+    limit: int = Query(default=50, ge=1, le=500),
+    mode: str = Query(default=""),
+    target_agent_id: str = Query(default=""),
+    svc: CollaborationService = Depends(get_service),
+):
+    events = svc.list_events(
+        limit=limit,
+        mode=mode or None,
+        target_agent_id=target_agent_id or None,
+    )
+    return {"events": events}

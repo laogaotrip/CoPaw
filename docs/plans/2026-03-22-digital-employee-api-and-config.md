@@ -203,3 +203,26 @@ These endpoints are available in both global and agent-scoped routing.
 ### Batch-4 test summary
 - `tests/unit/crons/test_trigger_security.py`: `4 passed`
 - `tests/unit`: `306 passed`
+
+## 13) Collaboration Hardening (C)
+
+### New API
+- `GET /collaboration/events`
+  - Query params:
+    - `limit` (1-500, default 50)
+    - `mode` (optional: `notify|consult|delegate`)
+    - `target_agent_id` (optional)
+
+### Runtime behavior
+- Collaboration boundary enforcement:
+  - Source and target agent workspaces must share the same workspaces root.
+  - Cross-root collaboration requests are rejected.
+- Collaboration event query:
+  - Reads from `collaboration_events.jsonl`
+  - Returns latest-first order
+  - Supports in-memory filtering by mode and target agent
+
+### Batch-5 test summary
+- `tests/unit/collaboration/test_service.py`: `6 passed`
+- `tests/unit/collaboration/test_api.py`: `1 passed`
+- `tests/unit`: `309 passed`
