@@ -118,3 +118,11 @@ async def get_events(
         target_agent_id=target_agent_id or None,
     )
     return {"events": events}
+
+
+@router.get("/stats")
+async def get_stats(
+    since_hours: int = Query(default=24, ge=0, le=24 * 30),
+    svc: CollaborationService = Depends(get_service),
+):
+    return svc.get_stats(since_hours=since_hours)

@@ -222,3 +222,49 @@ def test_list_events_returns_latest_first_and_filterable(tmp_path: Path) -> None
     filtered = service.list_events(limit=10, mode="notify", target_agent_id="agent-b")
     assert len(filtered) == 1
     assert filtered[0]["mode"] == "notify"
+
+
+def test_get_stats_aggregates_by_mode_and_target(tmp_path: Path) -> None:
+    ws = _DummyWorkspace(
+        agent_id="agent-a",
+        workspace_dir=str(tmp_path / "workspaces" / "agent-a"),
+    )
+    service = CollaborationService(ws)
+    events_path = Path(ws.workspace_dir) / "collaboration_events.jsonl"
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {
+            "time": "2026-03-22T10:00:00Z",
+            "source_agent_id": "agent-a",
+            "target_agent_id": "agent-b",
+            "mode": "notify",
+            "payload": {},
+            "response_text": "",
+        },
+        {
+            "time": "2026-03-22T10:01:00Z",
+            "source_agent_id": "agent-a",
+            "target_agent_id": "agent-c",
+            "mode": "delegate",
+            "payload": {},
+            "response_text": "ok",
+        },
+        {
+            "time": "2026-03-22T10:02:00Z",
+            "source_agent_id": "agent-a",
+            "target_agent_id": "agent-b",
+            "mode": "notify",
+            "payload": {},
+            "response_text": "",
+        },
+    ]
+    with events_path.open("w", encoding="utf-8") as fp:
+        for row in rows:
+            fp.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    stats = service.get_stats(since_hours=0)
+    assert stats["total"] == 3
+    assert stats["by_mode"]["notify"] == 2
+    assert stats["by_mode"]["delegate"] == 1
+    assert stats["by_target_agent"]["agent-b"] == 2
+    assert stats["by_target_agent"]["agent-c"] == 1

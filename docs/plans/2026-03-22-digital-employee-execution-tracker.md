@@ -142,3 +142,16 @@
   - Added unit tests:
     - `tests/unit/crons/test_audit_events.py`
   - Regression: full `tests/unit` passed.
+- 2026-03-22: Slice C observability enhancement implemented:
+  - Added collaboration stats aggregation capability in service layer.
+  - Added collaboration stats API:
+    - `GET /collaboration/stats`
+    - supports `since_hours` window filtering.
+  - Stats dimensions:
+    - total events
+    - by mode (`notify/consult/delegate`)
+    - by target agent
+  - Added/updated unit tests:
+    - `tests/unit/collaboration/test_service.py`
+    - `tests/unit/collaboration/test_api.py`
+  - Regression: full `tests/unit` passed.

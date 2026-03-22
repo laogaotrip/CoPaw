@@ -249,3 +249,24 @@ These endpoints are available in both global and agent-scoped routing.
 - `tests/unit/crons/test_audit_events.py`: `2 passed`
 - `tests/unit/crons`: `22 passed`
 - `tests/unit`: `311 passed`
+
+## 15) Collaboration Observability Stats (C)
+
+### New API
+- `GET /collaboration/stats`
+  - Query params:
+    - `since_hours` (0-720, default 24)
+
+### Runtime behavior
+- Service aggregates collaboration events from `collaboration_events.jsonl`.
+- Returns:
+  - `total`
+  - `by_mode`
+  - `by_target_agent`
+  - `since_hours`
+- Time-window filter uses event `time` field; `since_hours=0` means all records.
+
+### Batch-7 test summary
+- `tests/unit/collaboration/test_service.py`: `8 passed`
+- `tests/unit/collaboration/test_api.py`: `2 passed`
+- `tests/unit`: `313 passed`

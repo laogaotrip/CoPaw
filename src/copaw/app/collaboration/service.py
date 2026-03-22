@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -242,6 +242,33 @@ class CollaborationService:
         rows.reverse()  # latest first
         return rows[:max_limit]
 
+    def get_stats(self, *, since_hours: int = 24) -> Dict[str, Any]:
+        """Aggregate collaboration events for observability dashboards."""
+        rows = self.list_events(limit=10000)
+        cutoff = None
+        if since_hours > 0:
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+
+        by_mode: Dict[str, int] = {}
+        by_target: Dict[str, int] = {}
+        total = 0
+        for row in rows:
+            if cutoff is not None:
+                ts = self._parse_ts(row.get("time", ""))
+                if ts is None or ts < cutoff:
+                    continue
+            total += 1
+            mode = str(row.get("mode", "") or "unknown")
+            target = str(row.get("target_agent_id", "") or "unknown")
+            by_mode[mode] = by_mode.get(mode, 0) + 1
+            by_target[target] = by_target.get(target, 0) + 1
+        return {
+            "total": total,
+            "by_mode": by_mode,
+            "by_target_agent": by_target,
+            "since_hours": since_hours,
+        }
+
     def _events_path(self) -> Path:
         return Path(self._workspace.workspace_dir) / "collaboration_events.jsonl"
 
@@ -251,3 +278,16 @@ class CollaborationService:
         tgt_root = Path(target_workspace.workspace_dir).expanduser().resolve().parent
         if src_root != tgt_root:
             raise CollaborationError("target agent is outside workspace boundary")
+
+    @staticmethod
+    def _parse_ts(ts: str) -> Optional[datetime]:
+        if not ts:
+            return None
+        fixed = ts.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(fixed)
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
