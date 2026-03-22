@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
@@ -62,6 +63,12 @@ class CronManager:
         self._rt: Dict[str, _Runtime] = {}
         self._on_message_jobs: set[str] = set()
         self._webhook_jobs: set[str] = set()
+        self._audit_path: Optional[Path] = None
+        repo_path = getattr(repo, "path", None)
+        if repo_path is not None:
+            self._audit_path = Path(repo_path).expanduser().parent / (
+                "cron_audit_events.jsonl"
+            )
         self._started = False
 
     async def start(self) -> None:
@@ -147,6 +154,39 @@ class CronManager:
 
     def get_state(self, job_id: str) -> CronJobState:
         return self._states.get(job_id, CronJobState())
+
+    def list_audit_events(
+        self,
+        *,
+        limit: int = 100,
+        job_id: str = "",
+        status: str = "",
+        trigger_type: str = "",
+    ) -> list[Dict[str, Any]]:
+        """Read cron audit events from jsonl (latest-first)."""
+        max_limit = max(1, min(int(limit), 1000))
+        path = self._audit_path
+        if path is None or not path.exists():
+            return []
+        rows: list[Dict[str, Any]] = []
+        with path.open("r", encoding="utf-8") as fp:
+            for line in fp:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if job_id and row.get("job_id") != job_id:
+                    continue
+                if status and row.get("status") != status:
+                    continue
+                if trigger_type and row.get("trigger_type") != trigger_type:
+                    continue
+                rows.append(row)
+        rows.reverse()
+        return rows[:max_limit]
 
     # ----- write/control -----
 
@@ -335,6 +375,17 @@ class CronManager:
                 name=f"cron-on-message-{job.id}",
             )
             task.add_done_callback(lambda t, spec=job: self._task_done_cb(t, spec))
+            self._append_audit_event(
+                event_type="trigger",
+                job_id=job.id,
+                status="fired",
+                trigger_type="on_message",
+                detail={
+                    "channel": channel,
+                    "user_id": user_id,
+                    "session_id": session_id,
+                },
+            )
         return fired
 
     async def handle_webhook_event(
@@ -378,6 +429,16 @@ class CronManager:
                 name=f"cron-webhook-{job.id}",
             )
             task.add_done_callback(lambda t, spec=job: self._task_done_cb(t, spec))
+            self._append_audit_event(
+                event_type="trigger",
+                job_id=job.id,
+                status="fired",
+                trigger_type="webhook",
+                detail={
+                    "event": event,
+                    "source": source,
+                },
+            )
         return fired
 
     @staticmethod
@@ -626,6 +687,13 @@ class CronManager:
                 st.last_status = "skipped"
                 st.last_error = None
                 self._states[job.id] = st
+                self._append_audit_event(
+                    event_type="execute",
+                    job_id=job.id,
+                    status="skipped",
+                    trigger_type="poll",
+                    detail={"reason": "poll_response_unmatched"},
+                )
                 return
         except Exception as e:  # pylint: disable=broad-except
             st.last_status = "error"
@@ -635,6 +703,13 @@ class CronManager:
                 "cron poll probe failed: job_id=%s error=%s",
                 job.id,
                 repr(e),
+            )
+            self._append_audit_event(
+                event_type="execute",
+                job_id=job.id,
+                status="error",
+                trigger_type="poll",
+                detail={"error": repr(e)},
             )
             return
 
@@ -697,12 +772,26 @@ class CronManager:
                     "cron _execute_once: job_id=%s status=success",
                     job.id,
                 )
+                self._append_audit_event(
+                    event_type="execute",
+                    job_id=job.id,
+                    status="success",
+                    trigger_type=job.schedule.type,
+                    detail={},
+                )
             except asyncio.CancelledError:
                 st.last_status = "cancelled"
                 st.last_error = "Job was cancelled"
                 logger.info(
                     "cron _execute_once: job_id=%s status=cancelled",
                     job.id,
+                )
+                self._append_audit_event(
+                    event_type="execute",
+                    job_id=job.id,
+                    status="cancelled",
+                    trigger_type=job.schedule.type,
+                    detail={},
                 )
                 raise
             except Exception as e:  # pylint: disable=broad-except
@@ -713,7 +802,39 @@ class CronManager:
                     job.id,
                     repr(e),
                 )
+                self._append_audit_event(
+                    event_type="execute",
+                    job_id=job.id,
+                    status="error",
+                    trigger_type=job.schedule.type,
+                    detail={"error": repr(e)},
+                )
                 raise
             finally:
                 st.last_run_at = datetime.now(timezone.utc)
                 self._states[job.id] = st
+
+    def _append_audit_event(
+        self,
+        *,
+        event_type: str,
+        job_id: str,
+        status: str,
+        trigger_type: str,
+        detail: Dict[str, Any],
+    ) -> None:
+        path = self._audit_path
+        if path is None:
+            return
+        record = {
+            "time": datetime.now(timezone.utc).isoformat(),
+            "agent_id": self._agent_id or "",
+            "event_type": event_type,
+            "job_id": job_id,
+            "status": status,
+            "trigger_type": trigger_type,
+            "detail": detail,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fp:
+            fp.write(json.dumps(record, ensure_ascii=False) + "\n")

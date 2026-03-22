@@ -131,3 +131,14 @@
     - `tests/unit/collaboration/test_service.py`
     - `tests/unit/collaboration/test_api.py`
   - Regression: full `tests/unit` passed.
+- 2026-03-22: Slice C audit enhancement implemented:
+  - Added structured cron audit store (`cron_audit_events.jsonl`).
+  - Added cron audit query API:
+    - `GET /cron/audit/events`
+    - filters: `limit`, `job_id`, `status`, `trigger_type`.
+  - Added audit writes for:
+    - trigger fired events (`on_message`, `webhook`)
+    - execution status events (`success`, `error`, `cancelled`, `skipped`)
+  - Added unit tests:
+    - `tests/unit/crons/test_audit_events.py`
+  - Regression: full `tests/unit` passed.

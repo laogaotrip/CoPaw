@@ -226,3 +226,26 @@ These endpoints are available in both global and agent-scoped routing.
 - `tests/unit/collaboration/test_service.py`: `6 passed`
 - `tests/unit/collaboration/test_api.py`: `1 passed`
 - `tests/unit`: `309 passed`
+
+## 14) Cron Audit Enhancement (C)
+
+### New API
+- `GET /cron/audit/events`
+  - Query params:
+    - `limit` (1-1000, default 100)
+    - `job_id` (optional)
+    - `status` (optional)
+    - `trigger_type` (optional)
+
+### Runtime behavior
+- Cron manager writes structured audit lines to:
+  - `cron_audit_events.jsonl` (workspace-level alongside jobs store)
+- Audit records include:
+  - trigger fired (`on_message`, `webhook`)
+  - execution result (`success`, `error`, `cancelled`, `skipped`)
+- Query returns latest-first order with in-memory filters.
+
+### Batch-6 test summary
+- `tests/unit/crons/test_audit_events.py`: `2 passed`
+- `tests/unit/crons`: `22 passed`
+- `tests/unit`: `311 passed`

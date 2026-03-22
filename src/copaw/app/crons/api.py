@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from .manager import CronManager
@@ -125,6 +125,23 @@ async def get_job_state(
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
     return mgr.get_state(job_id).model_dump(mode="json")
+
+
+@router.get("/audit/events")
+async def get_audit_events(
+    limit: int = Query(default=100, ge=1, le=1000),
+    job_id: str = Query(default=""),
+    status: str = Query(default=""),
+    trigger_type: str = Query(default=""),
+    mgr: CronManager = Depends(get_cron_manager),
+):
+    events = mgr.list_audit_events(
+        limit=limit,
+        job_id=job_id,
+        status=status,
+        trigger_type=trigger_type,
+    )
+    return {"events": events}
 
 
 @router.post("/webhook/trigger")
