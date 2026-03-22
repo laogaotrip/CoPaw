@@ -50,9 +50,39 @@ class ToolGuardMixin:
     # Helpers
     # ------------------------------------------------------------------
 
+    def _get_autonomy_level(self) -> str:
+        """Return autonomy level from agent config (L1/L2/L3)."""
+        try:
+            level = getattr(self._agent_config.autonomy, "level", "L3")
+            return str(level or "L3").upper()
+        except Exception:
+            return "L3"
+
     def _should_require_approval(self) -> bool:
         """``True`` when a ``session_id`` is available for approval."""
+        if self._get_autonomy_level() != "L3":
+            return False
         return bool(self._request_context.get("session_id"))
+
+    async def _notify_l2_auto_execute(
+        self,
+        *,
+        tool_name: str,
+        findings_count: int,
+        severity: str,
+    ) -> None:
+        """Emit a lightweight notification for L2 auto execution."""
+        msg = Msg(
+            self.name,
+            "ℹ️ L2 autonomy auto-executed guarded tool / "
+            "L2 自治策略已自动执行受保护工具。\n"
+            f"- tool / 工具: `{tool_name}`\n"
+            f"- severity / 严重性: `{severity}`\n"
+            f"- findings / 发现数: `{findings_count}`",
+            "assistant",
+        )
+        await self.print(msg, True)
+        await self.memory.add(msg)
 
     def _last_tool_response_is_denied(self) -> bool:
         """Check if the last message is a guard-denied tool result."""
@@ -164,6 +194,22 @@ class ToolGuardMixin:
                         )
 
                         log_findings(tool_name, result)
+
+                        autonomy_level = self._get_autonomy_level()
+                        if autonomy_level == "L2":
+                            await self._notify_l2_auto_execute(
+                                tool_name=tool_name,
+                                findings_count=result.findings_count,
+                                severity=result.max_severity.value,
+                            )
+                        elif autonomy_level == "L1":
+                            logger.info(
+                                "Tool guard: L1 auto-exec for '%s' "
+                                "(findings=%s severity=%s)",
+                                tool_name,
+                                result.findings_count,
+                                result.max_severity.value,
+                            )
 
                         if self._should_require_approval():
                             return await self._acting_with_approval(

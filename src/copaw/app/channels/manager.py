@@ -250,7 +250,20 @@ class ChannelManager:
                 }
 
             try:
-                channels.append(ch_cls.from_config(**filtered_kwargs))
+                channel_instance = ch_cls.from_config(**filtered_kwargs)
+                if isinstance(ch_cfg, dict):
+                    retries = int(ch_cfg.get("send_retries", 0) or 0)
+                    backoff_ms = int(
+                        ch_cfg.get("send_retry_backoff_ms", 200) or 200,
+                    )
+                else:
+                    retries = int(getattr(ch_cfg, "send_retries", 0) or 0)
+                    backoff_ms = int(
+                        getattr(ch_cfg, "send_retry_backoff_ms", 200) or 200,
+                    )
+                setattr(channel_instance, "_send_retries", retries)
+                setattr(channel_instance, "_send_retry_backoff_ms", backoff_ms)
+                channels.append(channel_instance)
             except Exception as e:
                 logger.warning(
                     "Failed to initialize channel '%s', skipping: %s",
@@ -518,11 +531,23 @@ class ChannelManager:
         )
         if bot_prefix and "bot_prefix" not in merged_meta:
             merged_meta["bot_prefix"] = bot_prefix
-        await ch.send_event(
-            user_id=user_id,
-            session_id=session_id,
-            event=event,
-            meta=merged_meta,
+        retries = int(getattr(ch, "_send_retries", 0) or 0)
+        backoff_ms = int(getattr(ch, "_send_retry_backoff_ms", 200) or 200)
+
+        async def _do_send() -> None:
+            await ch.send_event(
+                user_id=user_id,
+                session_id=session_id,
+                event=event,
+                meta=merged_meta,
+            )
+
+        await self._send_with_retries(
+            operation="send_event",
+            channel_name=getattr(ch, "channel", channel),
+            retries=retries,
+            backoff_ms=backoff_ms,
+            func=_do_send,
         )
 
     async def send_text(
@@ -572,8 +597,54 @@ class ChannelManager:
 
         # Send as content parts (single text part; use TextContent so channel
         # getattr(p, "type") / getattr(p, "text") work)
-        await ch.send_content_parts(
-            to_handle,
-            [TextContent(type=ContentType.TEXT, text=text)],
-            merged_meta,
+        retries = int(getattr(ch, "_send_retries", 0) or 0)
+        backoff_ms = int(getattr(ch, "_send_retry_backoff_ms", 200) or 200)
+
+        async def _do_send() -> None:
+            await ch.send_content_parts(
+                to_handle,
+                [TextContent(type=ContentType.TEXT, text=text)],
+                merged_meta,
+            )
+
+        await self._send_with_retries(
+            operation="send_text",
+            channel_name=ch_name,
+            retries=retries,
+            backoff_ms=backoff_ms,
+            func=_do_send,
         )
+
+    @staticmethod
+    async def _send_with_retries(
+        *,
+        operation: str,
+        channel_name: str,
+        retries: int,
+        backoff_ms: int,
+        func: Callable[[], Any],
+    ) -> None:
+        """Execute async send function with bounded retries."""
+        attempts = max(0, retries) + 1
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                await func()
+                return
+            except Exception as e:
+                last_error = e
+                if attempt >= attempts:
+                    break
+                sleep_s = max(0, backoff_ms) / 1000.0 * attempt
+                logger.warning(
+                    "%s failed: channel=%s attempt=%s/%s error=%s",
+                    operation,
+                    channel_name,
+                    attempt,
+                    attempts,
+                    e,
+                )
+                await asyncio.sleep(sleep_s)
+
+        assert last_error is not None
+        raise last_error

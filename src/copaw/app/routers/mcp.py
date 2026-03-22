@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import shlex
+import shutil
 from typing import Dict, List, Optional, Literal
 
 from fastapi import APIRouter, Body, HTTPException, Path, Request
@@ -128,6 +130,34 @@ class MCPClientUpdateRequest(BaseModel):
     )
 
 
+class MCPPreset(BaseModel):
+    """Discoverable MCP preset definition."""
+
+    key: str
+    name: str
+    description: str = ""
+    transport: Literal["stdio", "streamable_http", "sse"] = "stdio"
+    command: str = ""
+    args: List[str] = Field(default_factory=list)
+    cwd: str = ""
+    env: Dict[str, str] = Field(default_factory=dict)
+    url: str = ""
+    headers: Dict[str, str] = Field(default_factory=dict)
+    available: bool = True
+    availability_reason: str = ""
+
+
+class MCPImportPresetRequest(BaseModel):
+    """Import request from a discovered MCP preset."""
+
+    preset_key: str
+    client_key: str
+    enabled: bool = True
+    env: Dict[str, str] = Field(default_factory=dict)
+    headers: Dict[str, str] = Field(default_factory=dict)
+    description: Optional[str] = None
+
+
 def _mask_env_value(value: str) -> str:
     """
     Mask environment variable value showing first 2-3 chars and last 4 chars.
@@ -188,6 +218,46 @@ def _build_client_info(key: str, client: MCPClientConfig) -> MCPClientInfo:
     )
 
 
+def _preset_catalog() -> list[MCPPreset]:
+    """Built-in MCP presets for guided import."""
+    presets = [
+        MCPPreset(
+            key="filesystem",
+            name="Filesystem",
+            description="Read/write local files through MCP filesystem server.",
+            command="npx",
+            args=[
+                "-y",
+                "@modelcontextprotocol/server-filesystem",
+                ".",
+            ],
+        ),
+        MCPPreset(
+            key="fetch",
+            name="Fetch",
+            description="HTTP fetch MCP server for web content retrieval.",
+            command="npx",
+            args=["-y", "@modelcontextprotocol/server-fetch"],
+        ),
+        MCPPreset(
+            key="github",
+            name="GitHub",
+            description="GitHub MCP server (requires token env).",
+            command="npx",
+            args=["-y", "@modelcontextprotocol/server-github"],
+            env={"GITHUB_TOKEN": "${GITHUB_TOKEN}"},
+        ),
+    ]
+    resolved: list[MCPPreset] = []
+    for preset in presets:
+        executable = shlex.split(preset.command)[0] if preset.command else ""
+        if executable and shutil.which(executable) is None:
+            preset.available = False
+            preset.availability_reason = f"missing executable: {executable}"
+        resolved.append(preset)
+    return resolved
+
+
 @router.get(
     "",
     response_model=List[MCPClientInfo],
@@ -206,6 +276,89 @@ async def list_mcp_clients(request: Request) -> List[MCPClientInfo]:
         _build_client_info(key, client)
         for key, client in mcp_config.clients.items()
     ]
+
+
+@router.get(
+    "/discovery/presets",
+    response_model=List[MCPPreset],
+    summary="List discoverable MCP presets",
+)
+async def list_mcp_presets() -> List[MCPPreset]:
+    """List built-in MCP presets for quick import."""
+    return _preset_catalog()
+
+
+@router.post(
+    "/discovery/import",
+    response_model=MCPClientInfo,
+    summary="Import MCP client from preset",
+    status_code=201,
+)
+async def import_mcp_from_preset(
+    request: Request,
+    body: MCPImportPresetRequest = Body(...),
+) -> MCPClientInfo:
+    """Create one MCP client from a discoverable preset."""
+    from ..agent_context import get_agent_for_request
+    from ...config.config import save_agent_config, MCPConfig
+
+    preset_map = {p.key: p for p in _preset_catalog()}
+    preset = preset_map.get(body.preset_key)
+    if preset is None:
+        raise HTTPException(404, detail=f"Preset '{body.preset_key}' not found")
+    if not preset.available:
+        raise HTTPException(
+            400,
+            detail=f"Preset '{body.preset_key}' unavailable: "
+            f"{preset.availability_reason}",
+        )
+
+    agent = await get_agent_for_request(request)
+    if agent.config.mcp is None:
+        agent.config.mcp = MCPConfig(clients={})
+    if body.client_key in agent.config.mcp.clients:
+        raise HTTPException(
+            400,
+            detail=f"MCP client '{body.client_key}' already exists",
+        )
+
+    merged_env = dict(preset.env or {})
+    merged_env.update(body.env or {})
+    merged_headers = dict(preset.headers or {})
+    merged_headers.update(body.headers or {})
+
+    new_client = MCPClientConfig(
+        name=preset.name,
+        description=body.description or preset.description,
+        enabled=body.enabled,
+        transport=preset.transport,
+        url=preset.url,
+        headers=merged_headers,
+        command=preset.command,
+        args=preset.args,
+        env=merged_env,
+        cwd=preset.cwd,
+    )
+    agent.config.mcp.clients[body.client_key] = new_client
+    save_agent_config(agent.agent_id, agent.config)
+
+    import asyncio
+
+    manager = request.app.state.multi_agent_manager
+    agent_id = agent.agent_id
+
+    async def reload_in_background():
+        try:
+            await manager.reload_agent(agent_id)
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                f"Background reload failed: {e}",
+            )
+
+    asyncio.create_task(reload_in_background())
+    return _build_client_info(body.client_key, new_client)
 
 
 @router.get(

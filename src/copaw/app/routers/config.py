@@ -17,6 +17,7 @@ from ...config import (
 )
 from ..channels.registry import BUILTIN_CHANNEL_KEYS
 from ...config.config import (
+    AgentAutonomyConfig,
     AgentsLLMRoutingConfig,
     ConsoleConfig,
     DingTalkConfig,
@@ -35,7 +36,7 @@ from ...config.config import (
     WecomConfig,
 )
 
-from .schemas_config import HeartbeatBody
+from .schemas_config import EvolutionBody, HeartbeatBody
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -95,6 +96,36 @@ async def list_channels(request: Request) -> dict:
             channel_data["isBuiltin"] = key in BUILTIN_CHANNEL_KEYS
         result[key] = channel_data
 
+    return result
+
+
+@router.get(
+    "/channels/health",
+    summary="Channel health snapshot",
+    description="Return enabled channels and runtime status for current agent",
+)
+async def get_channel_health(request: Request) -> dict:
+    """Get channel runtime health for current agent."""
+    from ..agent_context import get_agent_for_request
+
+    agent = await get_agent_for_request(request)
+    manager = agent.channel_manager
+    result = {}
+    channels_cfg = agent.config.channels
+    if channels_cfg is None:
+        return result
+    for channel_key, cfg in channels_cfg.model_dump().items():
+        enabled = bool((cfg or {}).get("enabled", False))
+        if not enabled:
+            continue
+        runtime_found = False
+        if manager is not None:
+            runtime_found = await manager.get_channel(channel_key) is not None
+        result[channel_key] = {
+            "enabled": enabled,
+            "runtime_found": runtime_found,
+            "status": "up" if runtime_found else "missing",
+        }
     return result
 
 
@@ -323,6 +354,96 @@ async def put_heartbeat(
     asyncio.create_task(reschedule_in_background())
 
     return hb.model_dump(mode="json", by_alias=True)
+
+
+@router.get(
+    "/evolution",
+    summary="Get evolution config",
+    description="Return current self-evolution loop config",
+)
+async def get_evolution(request: Request) -> Any:
+    """Return effective self-evolution config."""
+    from ..agent_context import get_agent_for_request
+    from ...config.config import EvolutionConfig as EvolutionConfigModel
+
+    agent = await get_agent_for_request(request)
+    evo = agent.config.evolution
+    if evo is None:
+        evo = EvolutionConfigModel()
+    return evo.model_dump(mode="json")
+
+
+@router.put(
+    "/evolution",
+    summary="Update evolution config",
+    description="Update self-evolution config and hot-reload scheduler",
+)
+async def put_evolution(
+    request: Request,
+    body: EvolutionBody = Body(..., description="Evolution configuration"),
+) -> Any:
+    """Update self-evolution config and reschedule evolution job."""
+    from ..agent_context import get_agent_for_request
+    from ...config.config import save_agent_config
+
+    agent = await get_agent_for_request(request)
+    evo = EvolutionConfig(
+        enabled=body.enabled,
+        mode=body.mode,
+        every=body.every,
+        query_file=body.query_file,
+        timeout_seconds=body.timeout_seconds,
+        session_id=body.session_id,
+        user_id=body.user_id,
+    )
+    agent.config.evolution = evo
+    save_agent_config(agent.agent_id, agent.config)
+
+    import asyncio
+
+    async def reschedule_in_background():
+        try:
+            if agent.cron_manager is not None:
+                await agent.cron_manager.reschedule_evolution()
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                f"Background evolution reschedule failed: {e}",
+            )
+
+    asyncio.create_task(reschedule_in_background())
+    return evo.model_dump(mode="json")
+
+
+@router.get(
+    "/autonomy",
+    response_model=AgentAutonomyConfig,
+    summary="Get autonomy policy",
+)
+async def get_autonomy(request: Request) -> AgentAutonomyConfig:
+    from ..agent_context import get_agent_for_request
+
+    agent = await get_agent_for_request(request)
+    return agent.config.autonomy
+
+
+@router.put(
+    "/autonomy",
+    response_model=AgentAutonomyConfig,
+    summary="Update autonomy policy",
+)
+async def put_autonomy(
+    request: Request,
+    body: AgentAutonomyConfig = Body(...),
+) -> AgentAutonomyConfig:
+    from ..agent_context import get_agent_for_request
+    from ...config.config import save_agent_config
+
+    agent = await get_agent_for_request(request)
+    agent.config.autonomy = body
+    save_agent_config(agent.agent_id, agent.config)
+    return body
 
 
 @router.get(

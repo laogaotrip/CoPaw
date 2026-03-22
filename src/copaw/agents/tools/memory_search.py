@@ -18,6 +18,7 @@ def create_memory_search_tool(memory_manager):
         query: str,
         max_results: int = 5,
         min_score: float = 0.1,
+        scope: str = "auto",
     ) -> ToolResponse:
         """
         Search MEMORY.md and memory/*.md files semantically.
@@ -33,6 +34,9 @@ def create_memory_search_tool(memory_manager):
                 Maximum number of search results to return. Defaults to 5.
             min_score (`float`, optional):
                 Minimum similarity score for results. Defaults to 0.1.
+            scope (`str`, optional):
+                Knowledge scope: `auto` | `personal` | `team`.
+                Defaults to `auto`.
 
         Returns:
             `ToolResponse`:
@@ -49,7 +53,15 @@ def create_memory_search_tool(memory_manager):
             )
 
         try:
-            # memory_manager.memory_search already returns ToolResponse
+            if hasattr(memory_manager, "memory_search_scoped"):
+                return await memory_manager.memory_search_scoped(
+                    query=query,
+                    max_results=max_results,
+                    min_score=min_score,
+                    scope=scope,
+                )
+
+            # Backward-compatible fallback.
             return await memory_manager.memory_search(
                 query=query,
                 max_results=max_results,

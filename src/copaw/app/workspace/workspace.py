@@ -243,6 +243,11 @@ class Workspace:
                     "timezone": "UTC",
                     "agent_id": ws.agent_id,
                 },
+                post_init=lambda ws, cm: setattr(
+                    ws._service_manager.services["runner"],
+                    "cron_manager",
+                    cm,
+                ),
                 start_method="start",
                 stop_method="stop",
                 priority=40,

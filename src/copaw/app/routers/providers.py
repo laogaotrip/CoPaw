@@ -62,6 +62,28 @@ class ModelSlotRequest(BaseModel):
     model: str = Field(..., description="Model identifier")
 
 
+class AgentModelSlotsRequest(BaseModel):
+    primary_model: ModelSlotConfig | None = Field(
+        default=None,
+        description="Primary model slot for current agent.",
+    )
+    fallback_model: ModelSlotConfig | None = Field(
+        default=None,
+        description="Fallback model slot for current agent.",
+    )
+    auto_model_failover: bool = Field(
+        default=True,
+        description="Whether to auto switch to fallback on primary failure.",
+    )
+
+
+class AgentModelSlotsResponse(BaseModel):
+    active_model: ModelSlotConfig | None = None
+    primary_model: ModelSlotConfig | None = None
+    fallback_model: ModelSlotConfig | None = None
+    auto_model_failover: bool = True
+
+
 class CreateCustomProviderRequest(BaseModel):
     id: str = Field(...)
     name: str = Field(...)
@@ -426,7 +448,27 @@ async def set_active_model(
             provider_id=body.provider_id,
             model=body.model,
         )
+        agent_config.primary_model = ModelSlotConfig(
+            provider_id=body.provider_id,
+            model=body.model,
+        )
         save_agent_config(workspace.agent_id, agent_config)
+
+        manager_ref = request.app.state.multi_agent_manager
+        agent_id = workspace.agent_id
+
+        async def reload_in_background():
+            try:
+                await manager_ref.reload_agent(agent_id)
+            except Exception as e:
+                logger.warning(
+                    "Background reload failed after setting active model: %s",
+                    e,
+                )
+
+        import asyncio
+
+        asyncio.create_task(reload_in_background())
     except Exception as e:
         # Log warning but don't fail the request
         logger.warning(
@@ -434,3 +476,90 @@ async def set_active_model(
         )
 
     return ActiveModelsInfo(active_llm=manager.get_active_model())
+
+
+@router.get(
+    "/agent-slots",
+    response_model=AgentModelSlotsResponse,
+    summary="Get current agent model slots",
+)
+async def get_agent_model_slots(
+    request: Request,
+) -> AgentModelSlotsResponse:
+    """Get current agent model slots with backward-compatible fields."""
+    workspace = await get_agent_for_request(request)
+    agent_config = load_agent_config(workspace.agent_id)
+    return AgentModelSlotsResponse(
+        active_model=agent_config.active_model,
+        primary_model=agent_config.primary_model,
+        fallback_model=agent_config.fallback_model,
+        auto_model_failover=agent_config.auto_model_failover,
+    )
+
+
+@router.put(
+    "/agent-slots",
+    response_model=AgentModelSlotsResponse,
+    summary="Set current agent model slots",
+)
+async def put_agent_model_slots(
+    request: Request,
+    body: AgentModelSlotsRequest = Body(...),
+) -> AgentModelSlotsResponse:
+    """Set primary/fallback model slots for current agent."""
+    manager = get_provider_manager(request)
+
+    # Validate configured slots early.
+    for slot in [body.primary_model, body.fallback_model]:
+        if slot is None:
+            continue
+        provider = manager.get_provider(slot.provider_id)
+        if provider is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Provider '{slot.provider_id}' not found",
+            )
+        if not provider.has_model(slot.model):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Model '{slot.model}' not found in provider "
+                    f"'{slot.provider_id}'"
+                ),
+            )
+
+    workspace = await get_agent_for_request(request)
+    agent_config = load_agent_config(workspace.agent_id)
+    agent_config.primary_model = body.primary_model
+    agent_config.fallback_model = body.fallback_model
+    agent_config.auto_model_failover = body.auto_model_failover
+
+    # Keep active_model aligned for backward compatibility.
+    agent_config.active_model = (
+        body.primary_model if body.primary_model else agent_config.active_model
+    )
+
+    save_agent_config(workspace.agent_id, agent_config)
+
+    manager_ref = request.app.state.multi_agent_manager
+    agent_id = workspace.agent_id
+
+    async def reload_in_background():
+        try:
+            await manager_ref.reload_agent(agent_id)
+        except Exception as e:
+            logger.warning(
+                "Background reload failed after setting model slots: %s",
+                e,
+            )
+
+    import asyncio
+
+    asyncio.create_task(reload_in_background())
+
+    return AgentModelSlotsResponse(
+        active_model=agent_config.active_model,
+        primary_model=agent_config.primary_model,
+        fallback_model=agent_config.fallback_model,
+        auto_model_failover=agent_config.auto_model_failover,
+    )

@@ -6,6 +6,7 @@ import pytest
 
 from copaw.config.config import (
     AgentProfileConfig,
+    EvolutionConfig,
     load_agent_config,
     save_agent_config,
 )
@@ -64,6 +65,12 @@ def test_agent_model_config_defaults_to_none(
     """Test that agent model config defaults to None."""
     agent_config = load_agent_config("test_agent")
     assert agent_config.active_model is None
+    assert agent_config.primary_model is None
+    assert agent_config.fallback_model is None
+    assert agent_config.knowledge.enable_personal is True
+    assert agent_config.knowledge.enable_team is False
+    assert agent_config.autonomy.level == "L3"
+    assert agent_config.evolution is None
 
 
 def test_agent_model_config_can_be_set(
@@ -248,3 +255,66 @@ def test_model_config_included_when_set(
     assert "active_model" in raw_data
     assert raw_data["active_model"]["provider_id"] == "openai"
     assert raw_data["active_model"]["model"] == "gpt-4-turbo"
+
+
+def test_primary_and_fallback_models_are_persisted(
+    mock_agent_workspace,
+):  # pylint: disable=redefined-outer-name
+    """Test that primary/fallback model slots persist in agent.json."""
+    agent_config = load_agent_config("test_agent")
+    agent_config.primary_model = ModelSlotConfig(
+        provider_id="openai",
+        model="gpt-4.1",
+    )
+    agent_config.fallback_model = ModelSlotConfig(
+        provider_id="anthropic",
+        model="claude-3-5-sonnet-20241022",
+    )
+    save_agent_config("test_agent", agent_config)
+
+    reloaded = load_agent_config("test_agent")
+    assert reloaded.primary_model is not None
+    assert reloaded.primary_model.provider_id == "openai"
+    assert reloaded.primary_model.model == "gpt-4.1"
+    assert reloaded.fallback_model is not None
+    assert reloaded.fallback_model.provider_id == "anthropic"
+    assert reloaded.fallback_model.model == "claude-3-5-sonnet-20241022"
+
+
+def test_knowledge_config_is_persisted(
+    mock_agent_workspace,
+):  # pylint: disable=redefined-outer-name
+    """Test that knowledge config persists in agent.json."""
+    agent_config = load_agent_config("test_agent")
+    agent_config.knowledge.enable_team = True
+    agent_config.knowledge.team_knowledge_dir = "shared_kb"
+    agent_config.knowledge.team_file_globs = ["**/*.md"]
+    save_agent_config("test_agent", agent_config)
+
+    reloaded = load_agent_config("test_agent")
+    assert reloaded.knowledge.enable_team is True
+    assert reloaded.knowledge.team_knowledge_dir == "shared_kb"
+    assert reloaded.knowledge.team_file_globs == ["**/*.md"]
+
+
+def test_autonomy_and_evolution_config_are_persisted(
+    mock_agent_workspace,
+):  # pylint: disable=redefined-outer-name
+    """Test that autonomy and evolution config persist in agent.json."""
+    agent_config = load_agent_config("test_agent")
+    agent_config.autonomy.level = "L2"
+    agent_config.evolution = EvolutionConfig(
+        enabled=True,
+        mode="full_auto",
+        every="6h",
+        query_file="SELF_EVOLUTION.md",
+        timeout_seconds=120,
+    )
+    save_agent_config("test_agent", agent_config)
+
+    reloaded = load_agent_config("test_agent")
+    assert reloaded.autonomy.level == "L2"
+    assert reloaded.evolution is not None
+    assert reloaded.evolution.enabled is True
+    assert reloaded.evolution.mode == "full_auto"
+    assert reloaded.evolution.every == "6h"

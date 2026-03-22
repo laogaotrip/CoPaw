@@ -3,23 +3,27 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from ...config import get_heartbeat_config
+from ...config import get_heartbeat_config, get_evolution_config
 
 from ..console_push_store import append as push_store_append
 from .executor import CronExecutor
+from .evolution import run_evolution_once
 from .heartbeat import parse_heartbeat_every, run_heartbeat_once
 from .models import CronJobSpec, CronJobState
 from .repo.base import BaseJobRepository
 
 HEARTBEAT_JOB_ID = "_heartbeat"
+EVOLUTION_JOB_ID = "_evolution"
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +56,7 @@ class CronManager:
         self._lock = asyncio.Lock()
         self._states: Dict[str, CronJobState] = {}
         self._rt: Dict[str, _Runtime] = {}
+        self._on_message_jobs: set[str] = set()
         self._started = False
 
     async def start(self) -> None:
@@ -65,12 +70,13 @@ class CronManager:
                 try:
                     await self._register_or_update(job)
                 except Exception as e:  # pylint: disable=broad-except
+                    cron_expr = job.schedule.cron if job.schedule else None
                     logger.warning(
                         "Skipping invalid cron job during startup: "
                         "job_id=%s name=%s cron=%s error=%s",
                         job.id,
                         job.name,
-                        job.schedule.cron,
+                        cron_expr,
                         repr(e),
                     )
                     if job.enabled:
@@ -98,6 +104,23 @@ class CronManager:
                 logger.info(
                     f"Heartbeat job scheduled for agent {self._agent_id}: "
                     f"every={hb.every} (interval={interval_seconds}s)",
+                )
+
+            evo = get_evolution_config(self._agent_id)
+            if getattr(evo, "enabled", False) and evo.mode == "full_auto":
+                interval_seconds = parse_heartbeat_every(evo.every)
+                self._scheduler.add_job(
+                    self._evolution_callback,
+                    trigger=IntervalTrigger(seconds=interval_seconds),
+                    id=EVOLUTION_JOB_ID,
+                    replace_existing=True,
+                )
+                logger.info(
+                    "Evolution job scheduled for agent %s: every=%s "
+                    "(interval=%ss)",
+                    self._agent_id,
+                    evo.every,
+                    interval_seconds,
                 )
 
             self._started = True
@@ -132,17 +155,28 @@ class CronManager:
         async with self._lock:
             if self._started and self._scheduler.get_job(job_id):
                 self._scheduler.remove_job(job_id)
+            self._on_message_jobs.discard(job_id)
             self._states.pop(job_id, None)
             self._rt.pop(job_id, None)
             return await self._repo.delete_job(job_id)
 
     async def pause_job(self, job_id: str) -> None:
         async with self._lock:
-            self._scheduler.pause_job(job_id)
+            spec = await self._repo.get_job(job_id)
+            if spec is None:
+                raise KeyError(f"Job not found: {job_id}")
+            if self._scheduler.get_job(job_id):
+                self._scheduler.pause_job(job_id)
+            await self._repo.upsert_job(spec.model_copy(update={"enabled": False}))
 
     async def resume_job(self, job_id: str) -> None:
         async with self._lock:
-            self._scheduler.resume_job(job_id)
+            spec = await self._repo.get_job(job_id)
+            if spec is None:
+                raise KeyError(f"Job not found: {job_id}")
+            if self._scheduler.get_job(job_id):
+                self._scheduler.resume_job(job_id)
+            await self._repo.upsert_job(spec.model_copy(update={"enabled": True}))
 
     async def reschedule_heartbeat(self) -> None:
         """Reload heartbeat config and update or remove the heartbeat job.
@@ -180,6 +214,38 @@ class CronManager:
                 )
             else:
                 logger.info("heartbeat disabled, job removed")
+
+    async def reschedule_evolution(self) -> None:
+        """Reload evolution config and update or remove evolution job."""
+        async with self._lock:
+            if not self._started:
+                logger.warning(
+                    "CronManager not started for agent %s, cannot "
+                    "reschedule evolution.",
+                    self._agent_id,
+                )
+                return
+
+            evo = get_evolution_config(self._agent_id)
+
+            if self._scheduler.get_job(EVOLUTION_JOB_ID):
+                self._scheduler.remove_job(EVOLUTION_JOB_ID)
+
+            if getattr(evo, "enabled", False) and evo.mode == "full_auto":
+                interval_seconds = parse_heartbeat_every(evo.every)
+                self._scheduler.add_job(
+                    self._evolution_callback,
+                    trigger=IntervalTrigger(seconds=interval_seconds),
+                    id=EVOLUTION_JOB_ID,
+                    replace_existing=True,
+                )
+                logger.info(
+                    "evolution rescheduled: every=%s (interval=%ss)",
+                    evo.every,
+                    interval_seconds,
+                )
+            else:
+                logger.info("evolution disabled or not full_auto, job removed")
 
     async def run_job(self, job_id: str) -> None:
         """Trigger a job to run in the background (fire-and-forget).
@@ -233,19 +299,93 @@ class CronManager:
 
     # ----- internal -----
 
-    async def _register_or_update(self, spec: CronJobSpec) -> None:
-        # Validate and build trigger first. If cron is invalid, fail fast
-        # without mutating scheduler/runtime state.
-        trigger = self._build_trigger(spec)
+    async def handle_message_event(
+        self,
+        *,
+        channel: str,
+        user_id: str,
+        session_id: str,
+        text: str,
+    ) -> int:
+        """Handle one inbound user message and trigger on_message jobs."""
+        fired = 0
+        jobs = await self._repo.list_jobs()
+        for job in jobs:
+            if not job.enabled:
+                continue
+            if job.schedule.type != "on_message":
+                continue
+            if not self._on_message_matches(
+                job,
+                channel=channel,
+                user_id=user_id,
+                session_id=session_id,
+                text=text,
+            ):
+                continue
+            fired += 1
+            task = asyncio.create_task(
+                self._execute_once(job),
+                name=f"cron-on-message-{job.id}",
+            )
+            task.add_done_callback(lambda t, spec=job: self._task_done_cb(t, spec))
+        return fired
 
+    @staticmethod
+    def _on_message_matches(
+        job: CronJobSpec,
+        *,
+        channel: str,
+        user_id: str,
+        session_id: str,
+        text: str,
+    ) -> bool:
+        """Return True if on_message schedule matches the event."""
+        sch = job.schedule
+        if sch.channel and sch.channel != channel:
+            return False
+
+        expected_user = sch.user_id or job.dispatch.target.user_id
+        if expected_user and expected_user != user_id:
+            return False
+
+        expected_session = sch.session_id or job.dispatch.target.session_id
+        if expected_session and expected_session != session_id:
+            return False
+
+        if sch.contains and sch.contains.lower() not in (text or "").lower():
+            return False
+
+        if sch.pattern:
+            try:
+                if re.search(sch.pattern, text or "") is None:
+                    return False
+            except re.error:
+                return False
+
+        return True
+
+    async def _register_or_update(self, spec: CronJobSpec) -> None:
         # per-job concurrency semaphore
         self._rt[spec.id] = _Runtime(
             sem=asyncio.Semaphore(spec.runtime.max_concurrency),
         )
 
-        # replace existing
+        # Replace existing scheduler job if any
         if self._scheduler.get_job(spec.id):
             self._scheduler.remove_job(spec.id)
+
+        if spec.schedule.type == "on_message":
+            self._on_message_jobs.add(spec.id)
+            st = self._states.get(spec.id, CronJobState())
+            st.next_run_at = None
+            self._states[spec.id] = st
+            return
+
+        self._on_message_jobs.discard(spec.id)
+        # Validate and build trigger first. If invalid, fail fast without
+        # mutating scheduler/runtime state.
+        trigger = self._build_trigger(spec)
 
         self._scheduler.add_job(
             self._scheduled_callback,
@@ -265,13 +405,26 @@ class CronManager:
         st.next_run_at = aps_job.next_run_time if aps_job else None
         self._states[spec.id] = st
 
-    def _build_trigger(self, spec: CronJobSpec) -> CronTrigger:
+    def _build_trigger(self, spec: CronJobSpec):
+        schedule = spec.schedule
+        if schedule.type == "once":
+            assert schedule.at is not None
+            return DateTrigger(run_date=schedule.at, timezone=schedule.timezone)
+
+        if schedule.type == "interval":
+            assert schedule.every_seconds is not None
+            return IntervalTrigger(
+                seconds=schedule.every_seconds,
+                timezone=schedule.timezone,
+            )
+
         # enforce 5 fields (no seconds)
-        parts = [p for p in spec.schedule.cron.split() if p]
+        cron_expr = schedule.cron or ""
+        parts = [p for p in cron_expr.split() if p]
         if len(parts) != 5:
             raise ValueError(
                 f"cron must have 5 fields, got {len(parts)}:"
-                f" {spec.schedule.cron}",
+                f" {cron_expr}",
             )
 
         minute, hour, day, month, day_of_week = parts
@@ -281,7 +434,7 @@ class CronManager:
             day=day,
             month=month,
             day_of_week=day_of_week,
-            timezone=spec.schedule.timezone,
+            timezone=schedule.timezone,
         )
 
     async def _scheduled_callback(self, job_id: str) -> None:
@@ -316,6 +469,24 @@ class CronManager:
             raise
         except Exception:  # pylint: disable=broad-except
             logger.exception("heartbeat run failed")
+
+    async def _evolution_callback(self) -> None:
+        """Run one self-evolution iteration from SELF_EVOLUTION.md."""
+        try:
+            workspace_dir = None
+            if hasattr(self._runner, "workspace_dir"):
+                workspace_dir = self._runner.workspace_dir
+
+            await run_evolution_once(
+                runner=self._runner,
+                agent_id=self._agent_id,
+                workspace_dir=workspace_dir,
+            )
+        except asyncio.CancelledError:
+            logger.info("evolution cancelled")
+            raise
+        except Exception:  # pylint: disable=broad-except
+            logger.exception("evolution run failed")
 
     async def _execute_once(self, job: CronJobSpec) -> None:
         rt = self._rt.get(job.id)

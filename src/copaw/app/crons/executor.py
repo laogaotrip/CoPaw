@@ -61,9 +61,30 @@ class CronExecutor:
         req: Dict[str, Any] = job.request.model_dump(mode="json")
         req["user_id"] = target_user_id or "cron"
         req["session_id"] = target_session_id or f"cron:{job.id}"
+        req["source"] = "cron"
+        target_agent_id = dispatch_meta.get("target_agent_id")
+
+        runner = self._runner
+        if target_agent_id:
+            manager = getattr(self._runner, "_manager", None)
+            if manager is None:
+                raise RuntimeError(
+                    "target_agent_id is set but multi-agent manager is unavailable",
+                )
+            target_workspace = await manager.get_agent(target_agent_id)
+            if target_workspace.runner is None:
+                raise RuntimeError(
+                    f"target agent runner is unavailable: {target_agent_id}",
+                )
+            runner = target_workspace.runner
+            logger.info(
+                "cron agent routing: job_id=%s target_agent_id=%s",
+                job.id,
+                target_agent_id,
+            )
 
         async def _run() -> None:
-            async for event in self._runner.stream_query(req):
+            async for event in runner.stream_query(req):
                 await self._channel_manager.send_event(
                     channel=job.dispatch.channel,
                     user_id=target_user_id,

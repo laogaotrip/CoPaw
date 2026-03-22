@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, Literal, Optional
+import re
 
 from pydantic import (
     BaseModel,
@@ -56,13 +57,44 @@ def _crontab_dow_to_name(field: str) -> str:
 
 
 class ScheduleSpec(BaseModel):
-    type: Literal["cron"] = "cron"
-    cron: str = Field(...)
+    type: Literal["cron", "once", "interval", "on_message"] = "cron"
+    cron: Optional[str] = Field(default=None)
+    at: Optional[datetime] = Field(
+        default=None,
+        description="For type=once, exact trigger time (ISO datetime).",
+    )
+    every_seconds: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="For type=interval, trigger interval in seconds.",
+    )
+    channel: Optional[str] = Field(
+        default=None,
+        description="For type=on_message, optional channel filter.",
+    )
+    user_id: Optional[str] = Field(
+        default=None,
+        description="For type=on_message, optional user_id filter.",
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="For type=on_message, optional session_id filter.",
+    )
+    contains: Optional[str] = Field(
+        default=None,
+        description="For type=on_message, case-insensitive substring match.",
+    )
+    pattern: Optional[str] = Field(
+        default=None,
+        description="For type=on_message, regex pattern match.",
+    )
     timezone: str = "UTC"
 
     @field_validator("cron")
     @classmethod
-    def normalize_cron_5_fields(cls, v: str) -> str:
+    def normalize_cron_5_fields(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
         parts = [p for p in v.split() if p]
         if len(parts) == 5:
             parts[4] = _crontab_dow_to_name(parts[4])
@@ -83,6 +115,37 @@ class ScheduleSpec(BaseModel):
             "cron must have 5 fields "
             "(or 4/3 fields that can be normalized); seconds not supported.",
         )
+
+    @model_validator(mode="after")
+    def validate_schedule_by_type(self) -> "ScheduleSpec":
+        if self.type == "cron":
+            if not (self.cron and self.cron.strip()):
+                raise ValueError("schedule.cron is required when type=cron")
+            return self
+
+        if self.type == "once":
+            if self.at is None:
+                raise ValueError("schedule.at is required when type=once")
+            return self
+
+        if self.type == "interval":
+            if self.every_seconds is None:
+                raise ValueError(
+                    "schedule.every_seconds is required when type=interval",
+                )
+            return self
+
+        if self.type == "on_message":
+            if self.pattern:
+                try:
+                    re.compile(self.pattern)
+                except re.error as e:  # pragma: no cover
+                    raise ValueError(
+                        f"invalid schedule.pattern regex: {e}",
+                    ) from e
+            return self
+
+        return self
 
 
 class DispatchTarget(BaseModel):

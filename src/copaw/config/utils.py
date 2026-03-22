@@ -20,6 +20,7 @@ from ..constant import (
 )
 from .config import (
     Config,
+    EvolutionConfig,
     HeartbeatConfig,
     LastApiConfig,
     LastDispatchConfig,
@@ -497,6 +498,18 @@ def get_heartbeat_config(agent_id: Optional[str] = None) -> HeartbeatConfig:
         return HeartbeatConfig()
     hb = config.agents.defaults.heartbeat
     return hb if hb is not None else HeartbeatConfig()
+
+
+def get_evolution_config(agent_id: Optional[str] = None) -> EvolutionConfig:
+    """Return effective evolution config (from agent config or default)."""
+    if agent_id is not None:
+        try:
+            agent_config = load_agent_config(agent_id)
+            evo = agent_config.evolution
+            return evo if evo is not None else EvolutionConfig()
+        except Exception:
+            return EvolutionConfig()
+    return EvolutionConfig()
 
 
 def update_last_dispatch(

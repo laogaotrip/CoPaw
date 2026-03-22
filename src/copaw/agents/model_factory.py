@@ -32,9 +32,11 @@ except ImportError:  # pragma: no cover - compatibility fallback
 
 from .utils.tool_message_utils import _sanitize_tool_messages
 from ..providers import ProviderManager
+from ..providers.fallback_chat_model import FallbackChatModel
 from ..providers.retry_chat_model import RetryChatModel
 from ..token_usage import TokenRecordingModelWrapper
 from ..local_models import create_local_chat_model
+from ..providers.models import ModelSlotConfig
 
 
 def _file_url_to_path(url: str) -> str:
@@ -55,6 +57,48 @@ logger = logging.getLogger(__name__)
 _CHAT_MODEL_FORMATTER_MAP: dict[Type[ChatModelBase], Type[FormatterBase]] = {
     OpenAIChatModel: OpenAIChatFormatter,
 }
+
+
+def _is_valid_model_slot(slot: Optional[ModelSlotConfig]) -> bool:
+    return bool(slot and slot.provider_id and slot.model)
+
+
+def resolve_agent_model_slots(
+    agent_config: Any,
+) -> tuple[Optional[ModelSlotConfig], Optional[ModelSlotConfig]]:
+    """Resolve agent model slots with backward compatibility.
+
+    Resolution order:
+    1. primary_model (new)
+    2. active_model (legacy compatibility)
+    3. fallback_model (new)
+    """
+    primary = getattr(agent_config, "primary_model", None)
+    active = getattr(agent_config, "active_model", None)
+    fallback = getattr(agent_config, "fallback_model", None)
+
+    primary_slot = primary if _is_valid_model_slot(primary) else None
+    if primary_slot is None and _is_valid_model_slot(active):
+        primary_slot = active
+
+    fallback_slot = fallback if _is_valid_model_slot(fallback) else None
+    return primary_slot, fallback_slot
+
+
+def _build_chat_model_from_slot(slot: ModelSlotConfig) -> ChatModelBase:
+    """Build a chat model from one model slot."""
+    manager = ProviderManager.get_instance()
+    provider = manager.get_provider(slot.provider_id)
+    if provider is None:
+        raise ValueError(f"Provider '{slot.provider_id}' not found.")
+
+    if provider.is_local:
+        return create_local_chat_model(
+            model_id=slot.model,
+            stream=True,
+            generate_kwargs={"max_tokens": None},
+        )
+    return provider.get_chat_model_instance(slot.model)
 if AnthropicChatModel is not None and AnthropicChatFormatter is not None:
     _CHAT_MODEL_FORMATTER_MAP[AnthropicChatModel] = AnthropicChatFormatter
 if GeminiChatModel is not None and GeminiChatFormatter is not None:
@@ -306,47 +350,58 @@ def create_model_and_formatter(
             pass
 
     # Try to get agent-specific model first
-    model_slot = None
+    primary_slot: Optional[ModelSlotConfig] = None
+    fallback_slot: Optional[ModelSlotConfig] = None
+    auto_failover = True
     if agent_id:
         try:
             agent_config = load_agent_config(agent_id)
-            model_slot = agent_config.active_model
+            primary_slot, fallback_slot = resolve_agent_model_slots(
+                agent_config,
+            )
+            auto_failover = bool(
+                getattr(agent_config, "auto_model_failover", True),
+            )
         except Exception:
             pass
 
-    # Create chat model from agent-specific or global config
-    if model_slot and model_slot.provider_id and model_slot.model:
-        # Use agent-specific model
-        manager = ProviderManager.get_instance()
-        provider = manager.get_provider(model_slot.provider_id)
-        if provider is None:
-            raise ValueError(
-                f"Provider '{model_slot.provider_id}' not found.",
-            )
-        if provider.is_local:
-            model = create_local_chat_model(
-                model_id=model_slot.model,
-                stream=True,
-                generate_kwargs={"max_tokens": None},
-            )
-        else:
-            model = provider.get_chat_model_instance(model_slot.model)
-        provider_id = model_slot.provider_id
+    # Create chat model from agent-specific primary slot or global config
+    if _is_valid_model_slot(primary_slot):
+        primary_model = _build_chat_model_from_slot(primary_slot)
+        primary_provider_id = primary_slot.provider_id
     else:
-        # Fallback to global active model
-        model = ProviderManager.get_active_chat_model()
-        provider_id = (
+        primary_model = ProviderManager.get_active_chat_model()
+        primary_provider_id = (
             ProviderManager.get_instance().get_active_model().provider_id
         )
 
     # Create the formatter based on the real model class
-    formatter = _create_formatter_instance(model.__class__)
+    formatter = _create_formatter_instance(primary_model.__class__)
 
-    # Wrap with retry logic for transient LLM API errors
-    wrapped_model = TokenRecordingModelWrapper(provider_id, model)
-    wrapped_model = RetryChatModel(wrapped_model)
+    # Wrap primary model with token recording + retry
+    wrapped_primary = TokenRecordingModelWrapper(
+        primary_provider_id,
+        primary_model,
+    )
+    wrapped_primary = RetryChatModel(wrapped_primary)
 
-    return wrapped_model, formatter
+    # Optional fallback model
+    if auto_failover and _is_valid_model_slot(fallback_slot):
+        fallback_model = _build_chat_model_from_slot(fallback_slot)
+        wrapped_fallback = TokenRecordingModelWrapper(
+            fallback_slot.provider_id,
+            fallback_model,
+        )
+        wrapped_fallback = RetryChatModel(wrapped_fallback)
+        return (
+            FallbackChatModel(
+                primary=wrapped_primary,
+                fallback=wrapped_fallback,
+            ),
+            formatter,
+        )
+
+    return wrapped_primary, formatter
 
 
 def _create_formatter_instance(
@@ -375,4 +430,5 @@ def _create_formatter_instance(
 
 __all__ = [
     "create_model_and_formatter",
+    "resolve_agent_model_slots",
 ]

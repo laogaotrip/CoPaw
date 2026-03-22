@@ -74,6 +74,7 @@ class AgentRunner(Runner):
         )
         self._chat_manager = None  # Store chat_manager reference
         self._mcp_manager = None  # MCP client manager for hot-reload
+        self.cron_manager = None  # Cron manager for on_message triggers
         self.memory_manager: MemoryManager | None = None
 
     def set_chat_manager(self, chat_manager):
@@ -187,6 +188,23 @@ class AgentRunner(Runner):
         )
         query = _get_last_user_text(msgs)
         session_id = getattr(request, "session_id", "") or ""
+        source = getattr(request, "source", "") or ""
+
+        # Trigger on_message jobs for inbound user messages.
+        if (
+            self.cron_manager is not None
+            and query
+            and source != "cron"
+        ):
+            try:
+                await self.cron_manager.handle_message_event(
+                    channel=getattr(request, "channel", DEFAULT_CHANNEL),
+                    user_id=getattr(request, "user_id", "") or "",
+                    session_id=session_id,
+                    text=query,
+                )
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning("on_message trigger dispatch failed: %s", e)
 
         (
             approval_response,

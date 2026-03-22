@@ -11,6 +11,8 @@ Extends ReMeLight to provide memory management capabilities including:
 import logging
 import os
 import platform
+from pathlib import Path
+from typing import Optional
 
 from agentscope.formatter import FormatterBase
 from agentscope.message import Msg, TextBlock
@@ -78,6 +80,7 @@ class MemoryManager(ReMeLight):
         """
         # Extract configuration from agent_config
         self.agent_id: str = agent_id
+        self.working_dir = Path(working_dir)
 
         if not _REME_AVAILABLE:
             logger.warning(
@@ -290,6 +293,146 @@ class MemoryManager(ReMeLight):
             query=query,
             max_results=max_results,
             min_score=min_score,
+        )
+
+    def _resolve_team_knowledge_root(self) -> Optional[Path]:
+        """Resolve team knowledge directory from agent config."""
+        knowledge_cfg = load_agent_config(self.agent_id).knowledge
+        if not knowledge_cfg.enable_team or not knowledge_cfg.team_knowledge_dir:
+            return None
+        root = Path(knowledge_cfg.team_knowledge_dir).expanduser()
+        if not root.is_absolute():
+            root = (self.working_dir / root).resolve()
+        if not root.exists() or not root.is_dir():
+            return None
+        return root
+
+    def _search_team_knowledge(
+        self,
+        query: str,
+        *,
+        max_results: int,
+    ) -> list[str]:
+        """Lightweight full-text scan for shared team knowledge files."""
+        root = self._resolve_team_knowledge_root()
+        if root is None:
+            return []
+
+        knowledge_cfg = load_agent_config(self.agent_id).knowledge
+        patterns = knowledge_cfg.team_file_globs or ["**/*.md", "**/*.txt"]
+        max_scan = max(1, int(knowledge_cfg.team_max_scan_files))
+        query_lc = query.lower()
+
+        candidates: list[tuple[int, Path, str]] = []
+        seen: set[Path] = set()
+        scanned = 0
+        for pattern in patterns:
+            for path in root.glob(pattern):
+                if scanned >= max_scan:
+                    break
+                if path in seen or not path.is_file():
+                    continue
+                seen.add(path)
+                scanned += 1
+                try:
+                    text = path.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+                idx = text.lower().find(query_lc)
+                if idx < 0:
+                    continue
+                start = max(0, idx - 80)
+                end = min(len(text), idx + len(query) + 120)
+                snippet = " ".join(text[start:end].split())
+                score = text.lower().count(query_lc)
+                candidates.append((score, path, snippet))
+            if scanned >= max_scan:
+                break
+
+        candidates.sort(key=lambda item: (-item[0], str(item[1])))
+        results: list[str] = []
+        for score, path, snippet in candidates[:max_results]:
+            rel_path = path.relative_to(root).as_posix()
+            results.append(f"[{score}] {rel_path}: {snippet}")
+        return results
+
+    async def memory_search_scoped(
+        self,
+        query: str,
+        max_results: int = 5,
+        min_score: float = 0.1,
+        scope: str = "auto",
+    ) -> ToolResponse:
+        """Search personal/team knowledge with optional scope filter.
+
+        Args:
+            query: Search query.
+            max_results: Maximum results for each enabled layer.
+            min_score: Personal memory min score.
+            scope: one of "auto", "personal", "team".
+        """
+        scope_normalized = (scope or "auto").strip().lower()
+        if scope_normalized not in {"auto", "personal", "team"}:
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=(
+                            "Error: invalid scope. Use one of "
+                            "'auto', 'personal', 'team'.\n"
+                            "错误：scope 参数无效，可选值为 "
+                            "'auto'、'personal'、'team'。"
+                        ),
+                    ),
+                ],
+            )
+
+        knowledge_cfg = load_agent_config(self.agent_id).knowledge
+        parts: list[str] = []
+
+        if scope_normalized in {"auto", "personal"} and knowledge_cfg.enable_personal:
+            personal = await self.memory_search(
+                query=query,
+                max_results=max_results,
+                min_score=min_score,
+            )
+            personal_text = "\n".join(
+                block.text
+                for block in (personal.content or [])
+                if getattr(block, "type", "") == "text"
+                and getattr(block, "text", "")
+            )
+            if personal_text.strip():
+                parts.append("## Personal Memory\n" + personal_text.strip())
+
+        if scope_normalized in {"auto", "team"} and knowledge_cfg.enable_team:
+            team_results = self._search_team_knowledge(
+                query=query,
+                max_results=max_results,
+            )
+            if team_results:
+                parts.append("## Team Knowledge\n" + "\n".join(team_results))
+
+        if not parts:
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=(
+                            "No results found in selected knowledge scope.\n"
+                            "在所选知识域中未检索到结果。"
+                        ),
+                    ),
+                ],
+            )
+
+        return ToolResponse(
+            content=[
+                TextBlock(
+                    type="text",
+                    text="\n\n".join(parts),
+                ),
+            ],
         )
 
     def get_in_memory_memory(self, **_kwargs):

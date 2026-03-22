@@ -37,6 +37,18 @@ class BaseChannelConfig(BaseModel):
     allow_from: List[str] = Field(default_factory=list)
     deny_message: str = ""
     require_mention: bool = False
+    send_retries: int = Field(
+        default=0,
+        ge=0,
+        le=5,
+        description="Retry count for outbound channel sends.",
+    )
+    send_retry_backoff_ms: int = Field(
+        default=200,
+        ge=0,
+        le=5000,
+        description="Base backoff in milliseconds for send retries.",
+    )
 
 
 class IMessageChannelConfig(BaseChannelConfig):
@@ -210,6 +222,41 @@ class HeartbeatConfig(BaseModel):
     )
 
 
+class EvolutionConfig(BaseModel):
+    """Self-evolution loop configuration."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Whether self-evolution loop is enabled.",
+    )
+    mode: Literal["manual", "semi_auto", "full_auto"] = Field(
+        default="manual",
+        description="Evolution mode. Scheduler runs only for full_auto.",
+    )
+    every: str = Field(
+        default="24h",
+        description="Evolution cadence, e.g. 6h / 1h30m / 45m.",
+    )
+    query_file: str = Field(
+        default="SELF_EVOLUTION.md",
+        description="Workspace-local prompt file used by evolution loop.",
+    )
+    timeout_seconds: int = Field(
+        default=180,
+        ge=10,
+        le=3600,
+        description="Single evolution run timeout in seconds.",
+    )
+    session_id: str = Field(
+        default="evolution",
+        description="Session id used by evolution loop requests.",
+    )
+    user_id: str = Field(
+        default="evolution",
+        description="User id used by evolution loop requests.",
+    )
+
+
 class AgentsDefaultsConfig(BaseModel):
     heartbeat: Optional[HeartbeatConfig] = None
 
@@ -377,6 +424,52 @@ class AgentsLLMRoutingConfig(BaseModel):
     )
 
 
+class AgentKnowledgeConfig(BaseModel):
+    """Agent knowledge base configuration."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    enable_personal: bool = Field(
+        default=True,
+        description="Enable personal memory search for this agent.",
+    )
+    enable_team: bool = Field(
+        default=False,
+        description="Enable team/shared knowledge search for this agent.",
+    )
+    team_knowledge_dir: str = Field(
+        default="",
+        description=(
+            "Shared knowledge directory path. Relative paths are resolved "
+            "from the agent workspace."
+        ),
+    )
+    team_file_globs: List[str] = Field(
+        default_factory=lambda: ["**/*.md", "**/*.txt"],
+        description="Glob patterns for shared knowledge files.",
+    )
+    team_max_scan_files: int = Field(
+        default=200,
+        ge=1,
+        le=2000,
+        description="Maximum number of shared files to scan per query.",
+    )
+
+
+class AgentAutonomyConfig(BaseModel):
+    """Autonomy boundary and approval strategy."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    level: Literal["L1", "L2", "L3"] = Field(
+        default="L3",
+        description=(
+            "Autonomy level: L1 auto-exec, L2 auto-exec+notify, "
+            "L3 approval before execution."
+        ),
+    )
+
+
 class AgentProfileRef(BaseModel):
     """Agent Profile reference (stored in root config.json).
 
@@ -418,6 +511,10 @@ class AgentProfileConfig(BaseModel):
         default=None,
         description="Heartbeat configuration for this agent",
     )
+    evolution: Optional[EvolutionConfig] = Field(
+        default=None,
+        description="Self-evolution loop configuration for this agent",
+    )
     last_dispatch: Optional["LastDispatchConfig"] = Field(
         default=None,
         description="Last dispatch target for this agent",
@@ -430,9 +527,32 @@ class AgentProfileConfig(BaseModel):
         default_factory=AgentsLLMRoutingConfig,
         description="LLM routing settings",
     )
+    knowledge: AgentKnowledgeConfig = Field(
+        default_factory=AgentKnowledgeConfig,
+        description="Knowledge base settings",
+    )
+    autonomy: AgentAutonomyConfig = Field(
+        default_factory=AgentAutonomyConfig,
+        description="Autonomy and approval settings",
+    )
     active_model: Optional["ModelSlotConfig"] = Field(
         default=None,
         description="Active model for this agent (provider_id + model)",
+    )
+    primary_model: Optional["ModelSlotConfig"] = Field(
+        default=None,
+        description=(
+            "Primary model slot for this agent. If unset, `active_model` "
+            "is used for backward compatibility."
+        ),
+    )
+    fallback_model: Optional["ModelSlotConfig"] = Field(
+        default=None,
+        description="Fallback model slot for this agent when primary fails.",
+    )
+    auto_model_failover: bool = Field(
+        default=True,
+        description="Whether to auto fail over from primary to fallback model.",
     )
     language: str = Field(
         default="zh",
