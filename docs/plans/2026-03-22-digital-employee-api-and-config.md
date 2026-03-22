@@ -306,3 +306,21 @@ These endpoints are available in both global and agent-scoped routing.
 ### Batch-9 test summary
 - `tests/unit/app/test_api_contract_new_features.py`: `3 passed`
 - `tests/unit`: `318 passed`
+
+## 18) API Error Contract Regression Suite
+
+### Added coverage
+- collaboration error mapping:
+  - `notify`: `CollaborationError -> 400`
+  - `consult`: unexpected error `-> 500`
+  - `delegate`: `CollaborationError -> 400`
+- cron error mapping:
+  - `POST /cron/jobs/{job_id}/run`: missing job (`KeyError`) `-> 404`
+  - `POST /cron/jobs/{job_id}/run`: unexpected error `-> 500`
+
+### Test file
+- `tests/unit/app/test_api_error_contracts.py`
+
+### Batch-10 test summary
+- `tests/unit/app/test_api_error_contracts.py`: `5 passed`
+- `tests/unit`: `323 passed`

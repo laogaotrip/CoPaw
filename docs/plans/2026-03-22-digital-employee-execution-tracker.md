@@ -175,3 +175,12 @@
   - Added file:
     - `tests/unit/app/test_api_contract_new_features.py`
   - Regression: full `tests/unit` passed.
+- 2026-03-23: API error contract suite added:
+  - Added error-mapping tests for new collaboration/cron endpoints:
+    - `tests/unit/app/test_api_error_contracts.py`
+  - Verified HTTP status mapping consistency:
+    - collaboration `CollaborationError -> 400`
+    - collaboration unexpected errors `-> 500`
+    - cron run missing job `-> 404`
+    - cron run unexpected errors `-> 500`
+  - Regression: full `tests/unit` passed.
