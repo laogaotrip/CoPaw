@@ -318,3 +318,21 @@ def test_autonomy_and_evolution_config_are_persisted(
     assert reloaded.evolution.enabled is True
     assert reloaded.evolution.mode == "full_auto"
     assert reloaded.evolution.every == "6h"
+
+
+def test_trigger_policy_config_is_persisted(
+    mock_agent_workspace,
+):  # pylint: disable=redefined-outer-name
+    """Test that trigger policy config persists in agent.json."""
+    agent_config = load_agent_config("test_agent")
+    agent_config.triggers.enable_webhook = False
+    agent_config.triggers.enable_poll = False
+    agent_config.triggers.block_private_network = True
+    agent_config.triggers.allowed_poll_domains = ["example.com"]
+    save_agent_config("test_agent", agent_config)
+
+    reloaded = load_agent_config("test_agent")
+    assert reloaded.triggers.enable_webhook is False
+    assert reloaded.triggers.enable_poll is False
+    assert reloaded.triggers.block_private_network is True
+    assert reloaded.triggers.allowed_poll_domains == ["example.com"]

@@ -4,6 +4,7 @@ from .config import (
     ChannelConfig,
     ChannelConfigUnion,
     AgentsRunningConfig,
+    AgentTriggerPolicyConfig,
     EvolutionConfig,
     HeartbeatConfig,
     SecurityConfig,
@@ -15,6 +16,7 @@ from .utils import (
     get_config_path,
     get_evolution_config,
     get_heartbeat_config,
+    get_trigger_policy_config,
     get_heartbeat_query_path,
     get_playwright_chromium_executable_path,
     get_system_default_browser,
@@ -26,6 +28,7 @@ from .utils import (
 
 __all__ = [
     "AgentsRunningConfig",
+    "AgentTriggerPolicyConfig",
     "Config",
     "ChannelConfig",
     "ChannelConfigUnion",
@@ -38,6 +41,7 @@ __all__ = [
     "get_config_path",
     "get_evolution_config",
     "get_heartbeat_config",
+    "get_trigger_policy_config",
     "get_heartbeat_query_path",
     "get_playwright_chromium_executable_path",
     "get_system_default_browser",

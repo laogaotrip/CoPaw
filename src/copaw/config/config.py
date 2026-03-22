@@ -470,6 +470,35 @@ class AgentAutonomyConfig(BaseModel):
     )
 
 
+class AgentTriggerPolicyConfig(BaseModel):
+    """Trigger security policy for webhook/poll schedules."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    enable_webhook: bool = Field(
+        default=True,
+        description="Whether webhook trigger type is enabled for this agent.",
+    )
+    enable_poll: bool = Field(
+        default=True,
+        description="Whether poll trigger type is enabled for this agent.",
+    )
+    block_private_network: bool = Field(
+        default=True,
+        description=(
+            "Block private/local network targets for poll URLs "
+            "(SSRF guardrail)."
+        ),
+    )
+    allowed_poll_domains: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Optional domain allowlist for poll URLs. Empty means no "
+            "domain allowlist."
+        ),
+    )
+
+
 class AgentProfileRef(BaseModel):
     """Agent Profile reference (stored in root config.json).
 
@@ -534,6 +563,10 @@ class AgentProfileConfig(BaseModel):
     autonomy: AgentAutonomyConfig = Field(
         default_factory=AgentAutonomyConfig,
         description="Autonomy and approval settings",
+    )
+    triggers: AgentTriggerPolicyConfig = Field(
+        default_factory=AgentTriggerPolicyConfig,
+        description="Trigger security policy settings",
     )
     active_model: Optional["ModelSlotConfig"] = Field(
         default=None,

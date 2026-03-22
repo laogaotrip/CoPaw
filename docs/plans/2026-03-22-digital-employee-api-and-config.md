@@ -176,3 +176,30 @@ These endpoints are available in both global and agent-scoped routing.
 ### Batch-3 test summary
 - `tests/unit/collaboration/test_service.py`: `4 passed`
 - `tests/unit`: `301 passed`
+
+## 12) Trigger Security Guardrails (B hardening)
+
+### New per-agent config (`agent.json`)
+- `triggers.enable_webhook` (default `true`)
+- `triggers.enable_poll` (default `true`)
+- `triggers.block_private_network` (default `true`)
+- `triggers.allowed_poll_domains` (default `[]`)
+
+### New APIs
+- `GET /config/triggers`
+- `PUT /config/triggers`
+
+### Runtime hardening behavior
+- `poll_url` validation:
+  - only `http/https` scheme allowed
+  - host required
+  - optional domain allowlist check (`allowed_poll_domains`)
+  - private/local network blocking when `block_private_network=true`
+- Trigger type policy enforcement:
+  - `webhook` jobs rejected when `enable_webhook=false`
+  - `poll` jobs rejected when `enable_poll=false`
+  - inbound webhook dispatch is ignored when `enable_webhook=false`
+
+### Batch-4 test summary
+- `tests/unit/crons/test_trigger_security.py`: `4 passed`
+- `tests/unit`: `306 passed`

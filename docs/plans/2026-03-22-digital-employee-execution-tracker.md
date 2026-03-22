@@ -21,11 +21,11 @@
 - [~] H. MCP Enhancement (preset discovery/import APIs)
 
 ## Non-Regression Requirements
-- [ ] Existing config compatibility preserved (`active_model` and current cron behavior)
-- [ ] Existing API compatibility preserved (no breaking schema changes)
+- [x] Existing config compatibility preserved (`active_model` and current cron behavior)
+- [x] Existing API compatibility preserved (no breaking schema changes)
 - [ ] Existing frontend routes and component versions preserved
 - [ ] i18n keys added for all new user-visible strings
-- [ ] No new lint/test failures in existing suites
+- [x] No new lint/test failures in existing suites
 
 ## Test Gates
 - Unit tests for each new behavior
@@ -98,3 +98,25 @@
   - Added unit tests and full regression:
     - `tests/unit/collaboration/test_service.py`
     - full `tests/unit` passed.
+- 2026-03-22: Slice B security guardrails implemented:
+  - Added per-agent trigger policy config (`triggers`) in `agent.json`:
+    - `enable_webhook`
+    - `enable_poll`
+    - `block_private_network`
+    - `allowed_poll_domains`
+  - Added trigger policy APIs:
+    - `GET /config/triggers`
+    - `PUT /config/triggers`
+  - Added poll URL SSRF guardrails:
+    - only `http/https`
+    - optional domain allowlist
+    - private/local network blocking
+  - Integrated policy checks in cron runtime:
+    - reject webhook jobs when webhook disabled
+    - reject poll jobs when poll disabled
+    - reject unsafe poll URLs during registration
+    - ignore inbound webhook dispatch when webhook policy disabled
+  - Added unit tests:
+    - `tests/unit/crons/test_trigger_security.py`
+    - `tests/unit/workspace/test_agent_model.py` (trigger policy persistence)
+  - Regression: full `tests/unit` passed.

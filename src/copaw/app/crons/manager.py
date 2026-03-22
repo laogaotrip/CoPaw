@@ -16,6 +16,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from ...config import get_heartbeat_config, get_evolution_config
+from ...config import get_trigger_policy_config
 
 from ..console_push_store import append as push_store_append
 from .executor import CronExecutor
@@ -23,6 +24,7 @@ from .evolution import run_evolution_once
 from .heartbeat import parse_heartbeat_every, run_heartbeat_once
 from .models import CronJobSpec, CronJobState
 from .repo.base import BaseJobRepository
+from .security import validate_poll_url
 
 HEARTBEAT_JOB_ID = "_heartbeat"
 EVOLUTION_JOB_ID = "_evolution"
@@ -347,6 +349,9 @@ class CronManager:
         payload: Optional[Dict[str, Any]] = None,
     ) -> int:
         """Handle one inbound webhook event and trigger webhook jobs."""
+        policy = get_trigger_policy_config(self._agent_id)
+        if not policy.enable_webhook:
+            return 0
         fired = 0
         jobs = await self._repo.list_jobs()
         payload_text = text
@@ -474,6 +479,8 @@ class CronManager:
         return True
 
     async def _register_or_update(self, spec: CronJobSpec) -> None:
+        self._enforce_trigger_policy(spec)
+
         # per-job concurrency semaphore
         self._rt[spec.id] = _Runtime(
             sem=asyncio.Semaphore(spec.runtime.max_concurrency),
@@ -577,6 +584,17 @@ class CronManager:
         st = self._states.get(job_id, CronJobState())
         st.next_run_at = aps_job.next_run_time if aps_job else None
         self._states[job_id] = st
+
+    def _enforce_trigger_policy(self, spec: CronJobSpec) -> None:
+        """Validate trigger type and network target against policy."""
+        policy = get_trigger_policy_config(self._agent_id)
+        sch = spec.schedule
+        if sch.type == "webhook" and not policy.enable_webhook:
+            raise ValueError("webhook trigger is disabled by policy")
+        if sch.type == "poll":
+            if not policy.enable_poll:
+                raise ValueError("poll trigger is disabled by policy")
+            validate_poll_url(url=sch.poll_url or "", policy=policy)
 
     async def _execute_poll_once(self, job: CronJobSpec) -> None:
         sch = job.schedule

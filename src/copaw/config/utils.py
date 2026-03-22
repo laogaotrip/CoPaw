@@ -20,6 +20,7 @@ from ..constant import (
 )
 from .config import (
     Config,
+    AgentTriggerPolicyConfig,
     EvolutionConfig,
     HeartbeatConfig,
     LastApiConfig,
@@ -510,6 +511,19 @@ def get_evolution_config(agent_id: Optional[str] = None) -> EvolutionConfig:
         except Exception:
             return EvolutionConfig()
     return EvolutionConfig()
+
+
+def get_trigger_policy_config(
+    agent_id: Optional[str] = None,
+) -> AgentTriggerPolicyConfig:
+    """Return effective trigger policy config (from agent config or default)."""
+    if agent_id is not None:
+        try:
+            agent_config = load_agent_config(agent_id)
+            return agent_config.triggers
+        except Exception:
+            return AgentTriggerPolicyConfig()
+    return AgentTriggerPolicyConfig()
 
 
 def update_last_dispatch(

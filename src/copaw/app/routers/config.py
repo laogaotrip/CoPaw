@@ -18,6 +18,7 @@ from ...config import (
 from ..channels.registry import BUILTIN_CHANNEL_KEYS
 from ...config.config import (
     AgentAutonomyConfig,
+    AgentTriggerPolicyConfig,
     AgentsLLMRoutingConfig,
     ConsoleConfig,
     DingTalkConfig,
@@ -442,6 +443,36 @@ async def put_autonomy(
 
     agent = await get_agent_for_request(request)
     agent.config.autonomy = body
+    save_agent_config(agent.agent_id, agent.config)
+    return body
+
+
+@router.get(
+    "/triggers",
+    response_model=AgentTriggerPolicyConfig,
+    summary="Get trigger security policy",
+)
+async def get_triggers(request: Request) -> AgentTriggerPolicyConfig:
+    from ..agent_context import get_agent_for_request
+
+    agent = await get_agent_for_request(request)
+    return agent.config.triggers
+
+
+@router.put(
+    "/triggers",
+    response_model=AgentTriggerPolicyConfig,
+    summary="Update trigger security policy",
+)
+async def put_triggers(
+    request: Request,
+    body: AgentTriggerPolicyConfig = Body(...),
+) -> AgentTriggerPolicyConfig:
+    from ..agent_context import get_agent_for_request
+    from ...config.config import save_agent_config
+
+    agent = await get_agent_for_request(request)
+    agent.config.triggers = body
     save_agent_config(agent.agent_id, agent.config)
     return body
 
