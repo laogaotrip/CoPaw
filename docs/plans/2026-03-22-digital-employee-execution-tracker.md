@@ -11,20 +11,20 @@
 - H: MCP discovery/import enhancement
 
 ## Progress Matrix
-- [~] A. Primary/Fallback Models (in progress: config + runtime wrapper + API done; full regression pending)
+- [x] A. Primary/Fallback Models
 - [x] B. Unified Trigger Engine (phase-1/2 backend done: once/interval/on_message/webhook/poll)
 - [x] C. Agent Collaboration (v1 routing + v2 notify/consult/delegate API)
-- [~] D. Knowledge Base V1 (dual-layer search API/tool done; regression pending)
-- [~] E. Autonomy Boundaries (L1/L2/L3 policy wired to tool-guard flow)
-- [~] F. Self-Evolution (full-auto scheduler + config APIs)
-- [~] G. Channel Hardening (channel health + bounded send retries)
-- [~] H. MCP Enhancement (preset discovery/import APIs)
+- [x] D. Knowledge Base V1
+- [x] E. Autonomy Boundaries (L1/L2/L3 policy wired to tool-guard flow)
+- [x] F. Self-Evolution (full-auto scheduler + config APIs)
+- [x] G. Channel Hardening (channel health + bounded send retries)
+- [x] H. MCP Enhancement (preset discovery/import APIs)
 
 ## Non-Regression Requirements
 - [x] Existing config compatibility preserved (`active_model` and current cron behavior)
 - [x] Existing API compatibility preserved (no breaking schema changes)
-- [ ] Existing frontend routes and component versions preserved
-- [ ] i18n keys added for all new user-visible strings
+- [ ] Existing frontend routes and component versions preserved (manual UI验收待做)
+- [ ] i18n keys added for all new user-visible strings (本轮以后端 API/服务为主，待前端接入时补齐)
 - [x] No new lint/test failures in existing suites
 
 ## Test Gates
@@ -184,3 +184,13 @@
     - cron run missing job `-> 404`
     - cron run unexpected errors `-> 500`
   - Regression: full `tests/unit` passed.
+
+## Milestone Summary (2026-03-23)
+- Backend migration scope A-H is implemented on branch
+  `codex/clawith-feature-migration-plan`.
+- Cumulative migration commits:
+  - `80b03a1`, `c4dd97d`, `a52ca92`, `5c959d7`, `402b85b`,
+    `16ca9cd`, `ba71694`, `6f1b70d`, `3a47e3f`, `a529ca2`
+- Current automated verification baseline:
+  - `PYTHONPATH=src .venv312/bin/pytest -q tests/unit`
+  - Latest run: `323 passed`
