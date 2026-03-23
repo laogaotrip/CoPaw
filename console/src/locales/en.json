@@ -732,6 +732,20 @@
     "saveSuccess": "Tool guard settings saved",
     "saveFailed": "Failed to save tool guard settings",
     "loadFailed": "Failed to load tool guard settings",
+    "auth": {
+      "title": "Console Authentication",
+      "description": "Enable/disable console login and update the administrator password.",
+      "enabled": "Enable Login Authentication",
+      "enabledTooltip": "When enabled, entering the console requires login authentication.",
+      "username": "Admin Username",
+      "password": "New Password",
+      "passwordTooltip": "Leave empty to keep current password unchanged.",
+      "passwordPlaceholder": "Enter new admin password (optional)",
+      "saveSuccess": "Authentication settings updated",
+      "saveFailed": "Failed to update authentication settings",
+      "loadFailed": "Failed to load authentication settings",
+      "reloginRequired": "Authentication enabled. Please login again."
+    },
     "rules": {
       "title": "Detection Rules",
       "description": "Rules define regex patterns that trigger security alerts. Built-in rules can be disabled; custom rules can be added, edited, or deleted.",

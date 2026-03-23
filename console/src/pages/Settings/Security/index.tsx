@@ -1,10 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Form,
   Switch,
   Button,
   Card,
   Select,
+  Input,
   message,
   Tabs,
 } from "@agentscope-ai/design";
@@ -12,9 +13,12 @@ import {
   PlusCircleOutlined,
   SafetyOutlined,
   ScanOutlined,
+  LockOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import api from "../../../api";
+import { authApi } from "../../../api/modules/auth";
+import { clearAuthToken } from "../../../api/config";
 import { useToolGuard, type MergedRule } from "./useToolGuard";
 import {
   PageHeader,
@@ -44,7 +48,12 @@ function SecurityPage() {
   const { t } = useTranslation();
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
+  const [authForm] = Form.useForm();
   const [saving, setSaving] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authSaving, setAuthSaving] = useState(false);
+  const [authEnabled, setAuthEnabled] = useState(false);
+  const [authUsername, setAuthUsername] = useState("");
 
   const {
     config,
@@ -184,6 +193,75 @@ function SecurityPage() {
     label: name,
     value: name,
   }));
+
+  useEffect(() => {
+    let cancelled = false;
+    authApi
+      .getSettings()
+      .then((res) => {
+        if (cancelled) return;
+        setAuthEnabled(res.enabled);
+        setAuthUsername(res.username || "admin");
+        authForm.setFieldsValue({
+          enabled: res.enabled,
+          password: "",
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const errMsg =
+          err instanceof Error
+            ? err.message
+            : t("security.auth.loadFailed");
+        message.error(errMsg);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAuthLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authForm, t]);
+
+  const handleAuthSave = useCallback(async () => {
+    try {
+      setAuthSaving(true);
+      const values = await authForm.validateFields();
+      const payload: { enabled: boolean; password?: string } = {
+        enabled: values.enabled,
+      };
+      const nextPassword = (values.password || "").trim();
+      if (nextPassword) {
+        payload.password = nextPassword;
+      }
+
+      const res = await authApi.updateSettings(payload);
+      setAuthEnabled(res.enabled);
+      setAuthUsername(res.username || "admin");
+      authForm.setFieldsValue({
+        enabled: res.enabled,
+        password: "",
+      });
+      message.success(t("security.auth.saveSuccess"));
+
+      if (res.enabled) {
+        clearAuthToken();
+        message.info(t("security.auth.reloginRequired"));
+        window.location.href = "/login";
+      }
+    } catch (err) {
+      if (err instanceof Error && "errorFields" in err) {
+        return;
+      }
+      const errMsg =
+        err instanceof Error ? err.message : t("security.auth.saveFailed");
+      message.error(errMsg);
+    } finally {
+      setAuthSaving(false);
+    }
+  }, [authForm, t]);
 
   // Loading state
   if (loading) {
@@ -343,6 +421,77 @@ function SecurityPage() {
                     {t("security.skillScanner.description")}
                   </p>
                   <SkillScannerSection />
+                </div>
+              ),
+            },
+            {
+              key: "consoleAuth",
+              label: (
+                <span className={styles.tabLabel}>
+                  <LockOutlined />
+                  {t("security.auth.title")}
+                </span>
+              ),
+              children: (
+                <div className={styles.tabContent}>
+                  <p className={styles.tabDescription}>
+                    {t("security.auth.description")}
+                  </p>
+                  <Card className={styles.formCard}>
+                    <Form
+                      form={authForm}
+                      layout="vertical"
+                      className={styles.form}
+                      initialValues={{
+                        enabled: authEnabled,
+                        password: "",
+                      }}
+                    >
+                      <Form.Item
+                        label={t("security.auth.enabled")}
+                        name="enabled"
+                        valuePropName="checked"
+                        tooltip={t("security.auth.enabledTooltip")}
+                      >
+                        <Switch
+                          disabled={authLoading}
+                          onChange={(checked) => setAuthEnabled(checked)}
+                        />
+                      </Form.Item>
+                      <Form.Item label={t("security.auth.username")}>
+                        <Input disabled value={authUsername || "admin"} />
+                      </Form.Item>
+                      <Form.Item
+                        label={t("security.auth.password")}
+                        name="password"
+                        tooltip={t("security.auth.passwordTooltip")}
+                      >
+                        <Input.Password
+                          placeholder={t("security.auth.passwordPlaceholder")}
+                          autoComplete="new-password"
+                        />
+                      </Form.Item>
+                    </Form>
+                  </Card>
+                  <div className={styles.footerButtons}>
+                    <Button
+                      onClick={() =>
+                        authForm.setFieldsValue({ password: "" })
+                      }
+                      disabled={authSaving}
+                      style={{ marginRight: 8 }}
+                    >
+                      {t("common.reset")}
+                    </Button>
+                    <Button
+                      type="primary"
+                      onClick={handleAuthSave}
+                      loading={authSaving}
+                      disabled={authLoading}
+                    >
+                      {t("common.save")}
+                    </Button>
+                  </div>
                 </div>
               ),
             },

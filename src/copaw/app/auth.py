@@ -189,13 +189,16 @@ def _save_auth_data(data: dict) -> None:
 
 
 def is_auth_enabled() -> bool:
-    """Check whether authentication is enabled via environment variable.
+    """Check whether authentication is enabled.
 
-    Returns ``True`` when ``COPAW_AUTH_ENABLED`` is set to a truthy
-    value (``true``, ``1``, ``yes``).  The presence of a registered
-    user is checked separately by the middleware so that the first
-    user can still reach the registration page.
+    Priority:
+    1) Persisted flag in ``auth.json`` (console-managed)
+    2) Environment variable ``COPAW_AUTH_ENABLED`` (legacy/bootstrap)
     """
+    data = _load_auth_data()
+    enabled = data.get("enabled")
+    if isinstance(enabled, bool):
+        return enabled
     env_flag = os.environ.get("COPAW_AUTH_ENABLED", "").strip().lower()
     return env_flag in ("true", "1", "yes")
 
@@ -204,6 +207,22 @@ def has_registered_users() -> bool:
     """Return ``True`` if a user has been registered."""
     data = _load_auth_data()
     return bool(data.get("user"))
+
+
+def set_auth_enabled(enabled: bool) -> None:
+    """Persist authentication switch in ``auth.json``."""
+    data = _load_auth_data()
+    if data.get("_auth_load_error"):
+        data = {}
+    data["enabled"] = bool(enabled)
+    _save_auth_data(data)
+
+
+def get_registered_username() -> str:
+    """Return the registered username, or empty string if absent."""
+    data = _load_auth_data()
+    user = data.get("user") or {}
+    return str(user.get("username") or "")
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +255,32 @@ def register_user(username: str, password: str) -> Optional[str]:
     _save_auth_data(data)
     logger.info("User '%s' registered", username)
     return create_token(username)
+
+
+def set_user_password(password: str) -> str:
+    """Set/replace password for the registered user.
+
+    If no user exists, creates a default ``admin`` user.
+    Returns the affected username.
+    """
+    data = _load_auth_data()
+    if data.get("_auth_load_error"):
+        data = {}
+
+    user = data.get("user") or {}
+    username = str(user.get("username") or "admin")
+    pw_hash, salt = _hash_password(password)
+    data["user"] = {
+        "username": username,
+        "password_hash": pw_hash,
+        "password_salt": salt,
+    }
+
+    if not data.get("jwt_secret"):
+        data["jwt_secret"] = secrets.token_hex(32)
+
+    _save_auth_data(data)
+    return username
 
 
 def auto_register_from_env() -> None:
@@ -352,7 +397,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not path.startswith("/api/"):
             return True
 
-        # Allow localhost requests without auth (CLI runs locally)
+        # Allow direct localhost requests without auth (CLI runs locally).
+        # If the request is proxied (has X-Forwarded-For), do not bypass.
+        if request.headers.get("x-forwarded-for", "").strip():
+            return False
         client_host = request.client.host if request.client else ""
         return client_host in ("127.0.0.1", "::1")
 

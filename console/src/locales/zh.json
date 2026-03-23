@@ -698,6 +698,20 @@
     "saveSuccess": "工具防护设置已保存",
     "saveFailed": "保存工具防护设置失败",
     "loadFailed": "加载工具防护设置失败",
+    "auth": {
+      "title": "控制台认证",
+      "description": "开启或关闭控制台登录认证，并可更新管理员密码。",
+      "enabled": "启用登录认证",
+      "enabledTooltip": "启用后，进入控制台需要先登录认证。",
+      "username": "管理员用户名",
+      "password": "新密码",
+      "passwordTooltip": "留空表示保持当前密码不变。",
+      "passwordPlaceholder": "输入新的管理员密码（可选）",
+      "saveSuccess": "认证设置已更新",
+      "saveFailed": "认证设置更新失败",
+      "loadFailed": "加载认证设置失败",
+      "reloginRequired": "认证已开启，请重新登录。"
+    },
     "rules": {
       "title": "检测规则",
       "description": "规则定义了触发安全警告的正则表达式模式。内置规则可以禁用；自定义规则可以添加、编辑或删除。",
